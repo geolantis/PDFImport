@@ -38,9 +38,10 @@
         .progress-steps {
             display: flex;
             flex: 1;
-            max-width: 800px;
+            max-width: 900px;
             margin: 0 auto;
             align-items: center;
+            gap: 20px;
         }
         
         .progress-step {
@@ -48,13 +49,14 @@
             align-items: center;
             flex: 1;
             position: relative;
+            min-width: 0;
         }
         
         .progress-step:not(:last-child)::after {
             content: '';
             position: absolute;
-            left: 48px;
-            right: 0;
+            left: 44px;
+            right: -20px;
             height: 2px;
             background: #e0e0e0;
             top: 50%;
@@ -105,8 +107,8 @@
         }
         
         .progress-label {
-            margin-left: 12px;
-            font-size: 14px;
+            margin-left: 8px;
+            font-size: 12px;
             color: #6b7280;
             white-space: nowrap;
         }
@@ -688,6 +690,11 @@
             background: rgba(0, 0, 0, 0.4);
             z-index: 999;
             display: none;
+            pointer-events: none;
+        }
+        
+        .overlay.blocking {
+            pointer-events: all;
         }
         
         .coord-dialog {
@@ -702,6 +709,7 @@
             z-index: 1000;
             display: none;
             min-width: 480px;
+            pointer-events: all;
         }
         
         .coord-header {
@@ -1501,7 +1509,9 @@
                 
                 previewCtx.drawImage(canvas, 0, 0, previewCanvas.width, previewCanvas.height);
                 
-                document.querySelector('.overlay').style.display = 'block';
+                const overlay = document.querySelector('.overlay');
+                overlay.style.display = 'block';
+                overlay.classList.add('blocking');
                 document.querySelector('.preview-modal').style.display = 'block';
             };
             
@@ -1509,7 +1519,9 @@
         }
         
         function closePreview() {
-            document.querySelector('.overlay').style.display = 'none';
+            const overlay = document.querySelector('.overlay');
+            overlay.style.display = 'none';
+            overlay.classList.remove('blocking');
             document.querySelector('.preview-modal').style.display = 'none';
         }
         
@@ -1659,7 +1671,10 @@
         function showCoordinateDialog(x, y) {
             window.currentPdfPoint = { x, y };
             
-            document.querySelector('.overlay').style.display = 'block';
+            const overlay = document.querySelector('.overlay');
+            overlay.style.display = 'block';
+            overlay.classList.remove('blocking');
+            
             document.querySelector('.coord-dialog').style.display = 'block';
             document.querySelector('.point-number').textContent = currentPoint + 1;
             
@@ -1668,19 +1683,36 @@
             document.querySelector('.coord-y').value = '';
             
             // Enable map clicking
-            map.getCanvas().style.cursor = 'crosshair';
-            map.once('click', (e) => {
-                const coords = e.lngLat;
-                document.querySelector('.coord-x').value = coords.lng.toFixed(6);
-                document.querySelector('.coord-y').value = coords.lat.toFixed(6);
-                map.getCanvas().style.cursor = '';
-            });
+            if (map) {
+                map.getCanvas().style.cursor = 'crosshair';
+                
+                // Remove any existing click handlers
+                map.off('click', window.mapClickHandler);
+                
+                // Add new click handler
+                window.mapClickHandler = (e) => {
+                    const coords = e.lngLat;
+                    document.querySelector('.coord-x').value = coords.lng.toFixed(6);
+                    document.querySelector('.coord-y').value = coords.lat.toFixed(6);
+                    map.getCanvas().style.cursor = '';
+                    map.off('click', window.mapClickHandler);
+                };
+                
+                map.on('click', window.mapClickHandler);
+            }
         }
         
         function cancelCoordinate() {
-            document.querySelector('.overlay').style.display = 'none';
+            const overlay = document.querySelector('.overlay');
+            overlay.style.display = 'none';
+            overlay.classList.remove('blocking');
+            
             document.querySelector('.coord-dialog').style.display = 'none';
-            map.getCanvas().style.cursor = '';
+            
+            if (map) {
+                map.getCanvas().style.cursor = '';
+                map.off('click', window.mapClickHandler);
+            }
             
             // Remove the last marker
             const markers = document.querySelectorAll('.reference-point');
@@ -1706,8 +1738,16 @@
             currentPoint++;
             updatePointIndicators();
             
-            document.querySelector('.overlay').style.display = 'none';
+            const overlay = document.querySelector('.overlay');
+            overlay.style.display = 'none';
+            overlay.classList.remove('blocking');
+            
             document.querySelector('.coord-dialog').style.display = 'none';
+            
+            if (map) {
+                map.getCanvas().style.cursor = '';
+                map.off('click', window.mapClickHandler);
+            }
             
             if (currentPoint >= 2) {
                 updateNavigation();
@@ -1747,34 +1787,213 @@
                 reviewMap.addControl(new maplibregl.NavigationControl());
                 
                 reviewMap.on('load', () => {
-                    addGeoreferencedOverlay();
+                    // Add cadastral layers first
+                    reviewMap.addSource('gst_bev-source', {
+                        'type': 'vector',
+                        'url': 'https://gis.ktn.gv.at/osgdi/tilesets/gst_bev.json'
+                    });
+                    
+                    reviewMap.addLayer({
+                        'id': 'cadastral-parcels',
+                        'type': 'line',
+                        'source': 'gst_bev-source',
+                        'source-layer': 'gst_bev',
+                        'minzoom': 13,
+                        'maxzoom': 24,
+                        'paint': {
+                            'line-color': '#000000',
+                            'line-width': {
+                                'stops': [[13, 0.6], [15, 0.8]]
+                            }
+                        }
+                    });
+                    
+                    reviewMap.addLayer({
+                        'id': 'cadastral-labels',
+                        'type': 'symbol',
+                        'source': 'gst_bev-source',
+                        'source-layer': 'gst_bev',
+                        'minzoom': 16,
+                        'maxzoom': 24,
+                        'layout': {
+                            'text-field': '{knr}',
+                            'text-font': ['Open Sans Regular'],
+                            'text-size': {
+                                'stops': [[16, 10], [19, 14]]
+                            }
+                        },
+                        'paint': {
+                            'text-color': '#333333'
+                        }
+                    });
+                    
+                    // Then calculate and display overlay
+                    calculateAndDisplayOverlay();
                 });
             } else {
-                addGeoreferencedOverlay();
+                calculateAndDisplayOverlay();
             }
         }
         
-        function addGeoreferencedOverlay() {
-            // Calculate transformation based on reference points
-            // This is a simplified version - implement full transformation logic as needed
-            console.log('Adding overlay with reference points:', referencePoints);
+        // Convert WGS84 to Web Mercator projection
+        function lonLatToMercator(lon, lat) {
+            const x = lon * 20037508.34 / 180;
+            const y = Math.log(Math.tan((90 + lat) * Math.PI / 360)) / (Math.PI / 180);
+            const mercatorY = y * 20037508.34 / 180;
+            return { x, y: mercatorY };
+        }
+        
+        // Convert Web Mercator back to WGS84
+        function mercatorToLonLat(x, y) {
+            const lon = (x / 20037508.34) * 180;
+            const lat = (Math.atan(Math.exp((y / 20037508.34) * Math.PI)) * 360 / Math.PI) - 90;
+            return [lon, lat];
+        }
+        
+        function calculateAndDisplayOverlay() {
+            if (referencePoints.length < 2) return;
             
-            // For now, just fit bounds to reference points
-            if (referencePoints.length === 2) {
-                const bounds = [
-                    [Math.min(referencePoints[0].world.x, referencePoints[1].world.x),
-                     Math.min(referencePoints[0].world.y, referencePoints[1].world.y)],
-                    [Math.max(referencePoints[0].world.x, referencePoints[1].world.x),
-                     Math.max(referencePoints[0].world.y, referencePoints[1].world.y)]
-                ];
+            const p1 = referencePoints[0];
+            const p2 = referencePoints[1];
+            
+            // Get PDF dimensions
+            const pdfWidth = pdfData.width;
+            const pdfHeight = pdfData.height;
+            
+            // Convert PDF coordinates from normalized (0-1) to pixel coordinates
+            const pdf1 = {
+                x: p1.pdf.x * pdfWidth,
+                y: p1.pdf.y * pdfHeight
+            };
+            const pdf2 = {
+                x: p2.pdf.x * pdfWidth,
+                y: p2.pdf.y * pdfHeight
+            };
+            
+            // Convert world coordinates to Web Mercator (meters)
+            const world1_merc = lonLatToMercator(p1.world.x, p1.world.y);
+            const world2_merc = lonLatToMercator(p2.world.x, p2.world.y);
+            
+            // CRITICAL: PDF uses Y-down coordinate system, Mercator uses Y-up
+            // We need to flip Y coordinates for PDF
+            const pdf1_flipped = {
+                x: pdf1.x,
+                y: pdfHeight - pdf1.y  // Flip Y
+            };
+            const pdf2_flipped = {
+                x: pdf2.x,
+                y: pdfHeight - pdf2.y  // Flip Y
+            };
+            
+            // Vector from P1 to P2 in flipped PDF space (now Y-up like Mercator)
+            const pdfDx = pdf2_flipped.x - pdf1_flipped.x;
+            const pdfDy = pdf2_flipped.y - pdf1_flipped.y;
+            
+            // Vector from P1 to P2 in Mercator space (meters)
+            const mercDx = world2_merc.x - world1_merc.x;
+            const mercDy = world2_merc.y - world1_merc.y;
+            
+            // Calculate scale (meters per pixel)
+            const pdfDistance = Math.sqrt(pdfDx * pdfDx + pdfDy * pdfDy);
+            const mercDistance = Math.sqrt(mercDx * mercDx + mercDy * mercDy);
+            const scale = mercDistance / pdfDistance;
+            
+            // Calculate rotation (both coordinate systems now use Y-up)
+            const pdfAngle = Math.atan2(pdfDy, pdfDx);
+            const mercAngle = Math.atan2(mercDy, mercDx);
+            const rotation = mercAngle - pdfAngle;
+            
+            console.log('Transformation calculated:', {
+                scale: scale,
+                rotation: rotation * 180 / Math.PI,
+                pdfDimensions: { width: pdfWidth, height: pdfHeight }
+            });
+            
+            // Helper function to transform a point
+            function transformPoint(pdfX, pdfY) {
+                // First, flip the Y coordinate to convert from Y-down to Y-up
+                const flippedY = pdfHeight - pdfY;
                 
-                reviewMap.fitBounds(bounds, { padding: 50 });
+                // Translate to origin (relative to first reference point)
+                const tx = pdfX - pdf1_flipped.x;
+                const ty = flippedY - pdf1_flipped.y;
+                
+                // Apply rotation
+                const cosR = Math.cos(rotation);
+                const sinR = Math.sin(rotation);
+                const rx = tx * cosR - ty * sinR;
+                const ry = tx * sinR + ty * cosR;
+                
+                // Apply scale (convert to meters)
+                const sx = rx * scale;
+                const sy = ry * scale;
+                
+                // Translate to Mercator coordinates
+                const mercX = world1_merc.x + sx;
+                const mercY = world1_merc.y + sy;
+                
+                // Convert back to WGS84
+                return mercatorToLonLat(mercX, mercY);
             }
+            
+            // Transform the four corners of the PDF
+            const tl = transformPoint(0, 0);                 // Top-left of PDF
+            const tr = transformPoint(pdfWidth, 0);         // Top-right of PDF
+            const br = transformPoint(pdfWidth, pdfHeight); // Bottom-right of PDF
+            const bl = transformPoint(0, pdfHeight);        // Bottom-left of PDF
+            
+            // MapLibre image source expects coordinates in this order:
+            // top-left, top-right, bottom-right, bottom-left
+            const pdfBounds = [tl, tr, br, bl];
+            
+            // Add overlay to map
+            addPdfOverlay(pdfBounds);
+            
+            // Fit map to bounds
+            const lngs = pdfBounds.map(coord => coord[0]);
+            const lats = pdfBounds.map(coord => coord[1]);
+            const bounds = [
+                [Math.min(...lngs), Math.min(...lats)],
+                [Math.max(...lngs), Math.max(...lats)]
+            ];
+            
+            reviewMap.fitBounds(bounds, { padding: 50 });
+        }
+        
+        function addPdfOverlay(pdfBounds) {
+            // Remove existing overlay if any
+            if (reviewMap.getSource('pdf-overlay')) {
+                reviewMap.removeLayer('pdf-overlay-layer');
+                reviewMap.removeSource('pdf-overlay');
+            }
+            
+            console.log('Adding overlay with bounds:', pdfBounds);
+            console.log('Using processed PDF URL:', pdfData.processedUrl ? 'Available' : 'Missing');
+            
+            // Add new source and layer
+            reviewMap.addSource('pdf-overlay', {
+                type: 'image',
+                url: pdfData.processedUrl,
+                coordinates: pdfBounds
+            });
+            
+            reviewMap.addLayer({
+                id: 'pdf-overlay-layer',
+                type: 'raster',
+                source: 'pdf-overlay',
+                paint: {
+                    'raster-opacity': 0.7
+                }
+            });
+            
+            // Make sure opacity slider is connected
+            const currentOpacity = document.querySelector('.opacity-slider').value;
+            updateOverlayOpacity(currentOpacity);
         }
         
         function updateOverlayOpacity(value) {
-            if (reviewMap && reviewMap.getLayer('pdf-overlay')) {
-                reviewMap.setPaintProperty('pdf-overlay', 'raster-opacity', parseFloat(value) / 100);
+            if (reviewMap && reviewMap.getLayer('pdf-overlay-layer')) {
+                reviewMap.setPaintProperty('pdf-overlay-layer', 'raster-opacity', parseFloat(value) / 100);
             }
         }
         
