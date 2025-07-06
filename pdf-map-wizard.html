@@ -1,0 +1,1839 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PDF Import Wizard</title>
+    <script src='https://unpkg.com/maplibre-gl@3.6.2/dist/maplibre-gl.js'></script>
+    <link href='https://unpkg.com/maplibre-gl@3.6.2/dist/maplibre-gl.css' rel='stylesheet' />
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: #f8f9fa;
+            color: #1a1a1a;
+        }
+        
+        /* Wizard Container */
+        .wizard-container {
+            display: flex;
+            height: 100vh;
+            overflow: hidden;
+        }
+        
+        /* Wizard Steps Sidebar */
+        .wizard-sidebar {
+            width: 280px;
+            background: white;
+            border-right: 1px solid #e0e0e0;
+            padding: 30px 20px;
+            display: flex;
+            flex-direction: column;
+        }
+        
+        .wizard-header {
+            margin-bottom: 40px;
+        }
+        
+        .wizard-title {
+            font-size: 24px;
+            font-weight: 600;
+            color: #1a1a1a;
+            margin-bottom: 8px;
+        }
+        
+        .wizard-subtitle {
+            font-size: 14px;
+            color: #6b7280;
+        }
+        
+        /* Step Indicators */
+        .wizard-steps {
+            flex: 1;
+        }
+        
+        .step-item {
+            display: flex;
+            align-items: flex-start;
+            margin-bottom: 32px;
+            position: relative;
+        }
+        
+        .step-item:not(:last-child)::after {
+            content: '';
+            position: absolute;
+            left: 20px;
+            top: 40px;
+            width: 2px;
+            height: calc(100% + 16px);
+            background: #e0e0e0;
+        }
+        
+        .step-item.active::after {
+            background: linear-gradient(to bottom, #3b82f6 0%, #e0e0e0 100%);
+        }
+        
+        .step-item.completed::after {
+            background: #3b82f6;
+        }
+        
+        .step-indicator {
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            background: #f3f4f6;
+            border: 2px solid #e0e0e0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 600;
+            font-size: 16px;
+            margin-right: 16px;
+            position: relative;
+            z-index: 1;
+            transition: all 0.3s ease;
+        }
+        
+        .step-item.active .step-indicator {
+            background: #3b82f6;
+            border-color: #3b82f6;
+            color: white;
+            box-shadow: 0 0 0 4px rgba(59, 130, 246, 0.1);
+        }
+        
+        .step-item.completed .step-indicator {
+            background: #10b981;
+            border-color: #10b981;
+            color: white;
+        }
+        
+        .step-item.completed .step-indicator::after {
+            content: '✓';
+            position: absolute;
+            font-size: 20px;
+        }
+        
+        .step-item.completed .step-indicator span {
+            display: none;
+        }
+        
+        .step-content {
+            flex: 1;
+            padding-top: 8px;
+        }
+        
+        .step-title {
+            font-size: 16px;
+            font-weight: 500;
+            color: #9ca3af;
+            margin-bottom: 4px;
+            transition: color 0.3s ease;
+        }
+        
+        .step-item.active .step-title,
+        .step-item.completed .step-title {
+            color: #1a1a1a;
+        }
+        
+        .step-description {
+            font-size: 13px;
+            color: #9ca3af;
+            line-height: 1.4;
+        }
+        
+        /* Main Content Area */
+        .wizard-content {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            background: #f8f9fa;
+        }
+        
+        /* Step Content Header */
+        .content-header {
+            background: white;
+            border-bottom: 1px solid #e0e0e0;
+            padding: 20px 40px;
+        }
+        
+        .content-title {
+            font-size: 28px;
+            font-weight: 600;
+            color: #1a1a1a;
+            margin-bottom: 8px;
+        }
+        
+        .content-description {
+            font-size: 16px;
+            color: #6b7280;
+        }
+        
+        /* Step Content Body */
+        .content-body {
+            flex: 1;
+            padding: 40px;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+        }
+        
+        /* Navigation Footer */
+        .content-footer {
+            background: white;
+            border-top: 1px solid #e0e0e0;
+            padding: 20px 40px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        .nav-button {
+            padding: 12px 24px;
+            border: none;
+            border-radius: 8px;
+            font-size: 16px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .nav-button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+        
+        .nav-button.secondary {
+            background: #f3f4f6;
+            color: #374151;
+        }
+        
+        .nav-button.secondary:hover:not(:disabled) {
+            background: #e5e7eb;
+        }
+        
+        .nav-button.primary {
+            background: #3b82f6;
+            color: white;
+        }
+        
+        .nav-button.primary:hover:not(:disabled) {
+            background: #2563eb;
+            transform: translateY(-1px);
+            box-shadow: 0 4px 12px rgba(59, 130, 246, 0.3);
+        }
+        
+        /* Step 1: Upload Styles */
+        .upload-area {
+            width: 100%;
+            max-width: 600px;
+            padding: 60px;
+            border: 2px dashed #d1d5db;
+            border-radius: 12px;
+            background: white;
+            text-align: center;
+            transition: all 0.3s ease;
+            cursor: pointer;
+        }
+        
+        .upload-area:hover {
+            border-color: #3b82f6;
+            background: #f0f9ff;
+        }
+        
+        .upload-area.dragover {
+            border-color: #3b82f6;
+            background: #eff6ff;
+            transform: scale(1.02);
+        }
+        
+        .upload-icon {
+            width: 80px;
+            height: 80px;
+            margin: 0 auto 20px;
+            background: #eff6ff;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 40px;
+        }
+        
+        .upload-title {
+            font-size: 20px;
+            font-weight: 600;
+            color: #1a1a1a;
+            margin-bottom: 8px;
+        }
+        
+        .upload-subtitle {
+            font-size: 16px;
+            color: #6b7280;
+        }
+        
+        .file-input {
+            display: none;
+        }
+        
+        /* Step 2: Background Removal */
+        .removal-container {
+            display: flex;
+            gap: 40px;
+            width: 100%;
+            height: 100%;
+        }
+        
+        .pdf-preview {
+            flex: 1;
+            background: white;
+            border-radius: 12px;
+            padding: 20px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+            display: flex;
+            flex-direction: column;
+        }
+        
+        .preview-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+            padding-bottom: 20px;
+            border-bottom: 1px solid #e0e0e0;
+        }
+        
+        .preview-title {
+            font-size: 18px;
+            font-weight: 600;
+            color: #1a1a1a;
+        }
+        
+        .preview-tools {
+            display: flex;
+            gap: 12px;
+        }
+        
+        .tool-button {
+            padding: 8px 16px;
+            border: 1px solid #e0e0e0;
+            background: white;
+            border-radius: 6px;
+            font-size: 14px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        
+        .tool-button:hover {
+            background: #f3f4f6;
+            border-color: #d1d5db;
+        }
+        
+        .tool-button.active {
+            background: #3b82f6;
+            color: white;
+            border-color: #3b82f6;
+        }
+        
+        .pdf-viewer {
+            flex: 1;
+            position: relative;
+            overflow: auto;
+            background: #f8f9fa;
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        
+        .pdf-container {
+            position: relative;
+            display: inline-block;
+        }
+        
+        .pdf-image {
+            max-width: 100%;
+            display: block;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+        }
+        
+        .selection-canvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            cursor: crosshair;
+            z-index: 10;
+        }
+        
+        .removal-sidebar {
+            width: 320px;
+            background: white;
+            border-radius: 12px;
+            padding: 24px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+        }
+        
+        .mode-selector {
+            background: #f3f4f6;
+            padding: 4px;
+            border-radius: 8px;
+            display: flex;
+            gap: 4px;
+            margin-bottom: 24px;
+        }
+        
+        .mode-option {
+            flex: 1;
+            padding: 10px;
+            border: none;
+            background: transparent;
+            border-radius: 6px;
+            font-size: 14px;
+            font-weight: 500;
+            color: #6b7280;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+        
+        .mode-option.active {
+            background: white;
+            color: #1a1a1a;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+        }
+        
+        .instructions {
+            background: #eff6ff;
+            border: 1px solid #bfdbfe;
+            border-radius: 8px;
+            padding: 16px;
+            margin-bottom: 24px;
+        }
+        
+        .instructions-title {
+            font-size: 14px;
+            font-weight: 600;
+            color: #1d4ed8;
+            margin-bottom: 8px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .instructions-text {
+            font-size: 14px;
+            color: #3730a3;
+            line-height: 1.5;
+        }
+        
+        .selection-info {
+            margin-bottom: 24px;
+        }
+        
+        .info-label {
+            font-size: 14px;
+            color: #6b7280;
+            margin-bottom: 8px;
+        }
+        
+        .info-value {
+            font-size: 24px;
+            font-weight: 600;
+            color: #1a1a1a;
+        }
+        
+        .action-buttons {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+        
+        .action-button {
+            padding: 12px 20px;
+            border: none;
+            border-radius: 8px;
+            font-size: 14px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+        
+        .action-button.clear {
+            background: #fef3c7;
+            color: #92400e;
+        }
+        
+        .action-button.clear:hover {
+            background: #fde68a;
+        }
+        
+        .action-button.preview {
+            background: #e0e7ff;
+            color: #3730a3;
+        }
+        
+        .action-button.preview:hover {
+            background: #c7d2fe;
+        }
+        
+        /* Step 3: Reference Points */
+        .reference-container {
+            display: flex;
+            gap: 40px;
+            width: 100%;
+            height: 100%;
+        }
+        
+        .reference-pdf {
+            flex: 1;
+            background: white;
+            border-radius: 12px;
+            padding: 20px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+            position: relative;
+        }
+        
+        .reference-map {
+            flex: 1;
+            background: white;
+            border-radius: 12px;
+            padding: 20px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+        }
+        
+        .map-container {
+            width: 100%;
+            height: calc(100% - 60px);
+            border-radius: 8px;
+            overflow: hidden;
+            margin-top: 20px;
+        }
+        
+        #map {
+            width: 100%;
+            height: 100%;
+        }
+        
+        .crosshair {
+            position: absolute;
+            width: 60px;
+            height: 60px;
+            pointer-events: none;
+            display: none;
+            transform: translate(-50%, -50%);
+        }
+        
+        .crosshair::before,
+        .crosshair::after {
+            content: '';
+            position: absolute;
+            background: #ef4444;
+        }
+        
+        .crosshair::before {
+            width: 2px;
+            height: 100%;
+            left: 50%;
+            transform: translateX(-50%);
+        }
+        
+        .crosshair::after {
+            width: 100%;
+            height: 2px;
+            top: 50%;
+            transform: translateY(-50%);
+        }
+        
+        .reference-point {
+            position: absolute;
+            width: 20px;
+            height: 20px;
+            background: #ef4444;
+            border: 2px solid white;
+            border-radius: 50%;
+            transform: translate(-50%, -50%);
+            box-shadow: 0 2px 4px rgba(0,0,0,0.3);
+        }
+        
+        .reference-label {
+            position: absolute;
+            top: -25px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: #ef4444;
+            color: white;
+            padding: 2px 8px;
+            border-radius: 3px;
+            font-size: 12px;
+            white-space: nowrap;
+        }
+        
+        .reference-sidebar {
+            width: 320px;
+            background: white;
+            border-radius: 12px;
+            padding: 24px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+        }
+        
+        .point-list {
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+        }
+        
+        .point-item {
+            background: #f8f9fa;
+            border: 2px solid transparent;
+            border-radius: 8px;
+            padding: 16px;
+            transition: all 0.2s ease;
+        }
+        
+        .point-item.active {
+            background: #eff6ff;
+            border-color: #3b82f6;
+        }
+        
+        .point-item.completed {
+            background: #f0fdf4;
+            border-color: #10b981;
+        }
+        
+        .point-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 12px;
+        }
+        
+        .point-title {
+            font-size: 16px;
+            font-weight: 600;
+            color: #1a1a1a;
+        }
+        
+        .point-status {
+            width: 24px;
+            height: 24px;
+            border-radius: 50%;
+            background: #e5e7eb;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 12px;
+        }
+        
+        .point-item.completed .point-status {
+            background: #10b981;
+            color: white;
+        }
+        
+        .coord-inputs {
+            display: flex;
+            gap: 12px;
+        }
+        
+        .coord-input {
+            flex: 1;
+        }
+        
+        .coord-input label {
+            display: block;
+            font-size: 12px;
+            color: #6b7280;
+            margin-bottom: 4px;
+        }
+        
+        .coord-input input {
+            width: 100%;
+            padding: 8px 12px;
+            border: 1px solid #e0e0e0;
+            border-radius: 6px;
+            font-size: 14px;
+        }
+        
+        /* Step 4: Review & Export */
+        .review-container {
+            display: flex;
+            gap: 40px;
+            width: 100%;
+            height: 100%;
+        }
+        
+        .review-map {
+            flex: 2;
+            background: white;
+            border-radius: 12px;
+            padding: 20px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+        }
+        
+        .review-sidebar {
+            width: 320px;
+            background: white;
+            border-radius: 12px;
+            padding: 24px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+        }
+        
+        .opacity-control {
+            margin-bottom: 24px;
+        }
+        
+        .opacity-label {
+            font-size: 14px;
+            font-weight: 500;
+            color: #1a1a1a;
+            margin-bottom: 12px;
+            display: flex;
+            justify-content: space-between;
+        }
+        
+        .opacity-value {
+            color: #6b7280;
+        }
+        
+        .opacity-slider {
+            width: 100%;
+            height: 6px;
+            border-radius: 3px;
+            background: #e5e7eb;
+            outline: none;
+            -webkit-appearance: none;
+        }
+        
+        .opacity-slider::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            width: 18px;
+            height: 18px;
+            border-radius: 50%;
+            background: #3b82f6;
+            cursor: pointer;
+        }
+        
+        .export-options {
+            margin-top: 32px;
+        }
+        
+        .export-title {
+            font-size: 16px;
+            font-weight: 600;
+            color: #1a1a1a;
+            margin-bottom: 16px;
+        }
+        
+        .export-buttons {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+        
+        .export-button {
+            padding: 12px 20px;
+            border: 1px solid #e0e0e0;
+            background: white;
+            border-radius: 8px;
+            font-size: 14px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+        
+        .export-button:hover {
+            background: #f3f4f6;
+            border-color: #d1d5db;
+        }
+        
+        .export-format {
+            font-size: 12px;
+            color: #6b7280;
+        }
+        
+        /* Preview Overlay */
+        .preview-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.8);
+            z-index: 1000;
+            display: none;
+            align-items: center;
+            justify-content: center;
+        }
+        
+        .preview-modal {
+            background: white;
+            border-radius: 12px;
+            max-width: 80%;
+            max-height: 80%;
+            overflow: hidden;
+            box-shadow: 0 20px 50px rgba(0, 0, 0, 0.3);
+        }
+        
+        .preview-header {
+            padding: 20px 24px;
+            border-bottom: 1px solid #e0e0e0;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        .preview-title {
+            font-size: 20px;
+            font-weight: 600;
+            color: #1a1a1a;
+        }
+        
+        .preview-close {
+            width: 32px;
+            height: 32px;
+            border: none;
+            background: #f3f4f6;
+            border-radius: 6px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 20px;
+            color: #6b7280;
+        }
+        
+        .preview-close:hover {
+            background: #e5e7eb;
+        }
+        
+        .preview-body {
+            padding: 24px;
+            max-height: 60vh;
+            overflow: auto;
+        }
+        
+        .preview-canvas {
+            max-width: 100%;
+            display: block;
+            margin: 0 auto;
+        }
+        
+        .preview-footer {
+            padding: 20px 24px;
+            border-top: 1px solid #e0e0e0;
+            display: flex;
+            justify-content: flex-end;
+            gap: 12px;
+        }
+        
+        /* Coordinate Dialog */
+        .coord-dialog {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: white;
+            border-radius: 12px;
+            padding: 32px;
+            box-shadow: 0 20px 50px rgba(0, 0, 0, 0.3);
+            z-index: 1000;
+            display: none;
+            min-width: 400px;
+        }
+        
+        .coord-dialog-header {
+            margin-bottom: 24px;
+        }
+        
+        .coord-dialog-title {
+            font-size: 20px;
+            font-weight: 600;
+            color: #1a1a1a;
+            margin-bottom: 8px;
+        }
+        
+        .coord-dialog-subtitle {
+            font-size: 14px;
+            color: #6b7280;
+        }
+        
+        .coord-system-selector {
+            margin-bottom: 24px;
+        }
+        
+        .coord-system-label {
+            font-size: 14px;
+            font-weight: 500;
+            color: #1a1a1a;
+            margin-bottom: 8px;
+        }
+        
+        .coord-system-select {
+            width: 100%;
+            padding: 10px 12px;
+            border: 1px solid #e0e0e0;
+            border-radius: 6px;
+            font-size: 14px;
+        }
+        
+        .coord-dialog-inputs {
+            display: flex;
+            gap: 16px;
+            margin-bottom: 24px;
+        }
+        
+        .coord-dialog-buttons {
+            display: flex;
+            gap: 12px;
+            justify-content: flex-end;
+        }
+        
+        /* Loading State */
+        .loading-spinner {
+            width: 48px;
+            height: 48px;
+            border: 4px solid #f3f4f6;
+            border-top-color: #3b82f6;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin: 0 auto;
+        }
+        
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+        
+        /* Overlay */
+        .overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.4);
+            z-index: 999;
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <div class="wizard-container">
+        <!-- Wizard Sidebar -->
+        <div class="wizard-sidebar">
+            <div class="wizard-header">
+                <h1 class="wizard-title">PDF Import</h1>
+                <p class="wizard-subtitle">Georeference your PDF plans</p>
+            </div>
+            
+            <div class="wizard-steps">
+                <div class="step-item active" data-step="1">
+                    <div class="step-indicator">
+                        <span>1</span>
+                    </div>
+                    <div class="step-content">
+                        <h3 class="step-title">Upload PDF</h3>
+                        <p class="step-description">Select your PDF plan file</p>
+                    </div>
+                </div>
+                
+                <div class="step-item" data-step="2">
+                    <div class="step-indicator">
+                        <span>2</span>
+                    </div>
+                    <div class="step-content">
+                        <h3 class="step-title">Remove Background</h3>
+                        <p class="step-description">Clean up legends and frames</p>
+                    </div>
+                </div>
+                
+                <div class="step-item" data-step="3">
+                    <div class="step-indicator">
+                        <span>3</span>
+                    </div>
+                    <div class="step-content">
+                        <h3 class="step-title">Set Reference Points</h3>
+                        <p class="step-description">Define 2 georeferencing points</p>
+                    </div>
+                </div>
+                
+                <div class="step-item" data-step="4">
+                    <div class="step-indicator">
+                        <span>4</span>
+                    </div>
+                    <div class="step-content">
+                        <h3 class="step-title">Review & Export</h3>
+                        <p class="step-description">Preview and save your result</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Main Content Area -->
+        <div class="wizard-content">
+            <!-- Step 1: Upload -->
+            <div class="step-content-panel" data-step="1">
+                <div class="content-header">
+                    <h2 class="content-title">Upload Your PDF Plan</h2>
+                    <p class="content-description">Select a PDF file containing your plan or map to begin georeferencing</p>
+                </div>
+                
+                <div class="content-body">
+                    <div class="upload-area" onclick="document.getElementById('pdfInput').click()">
+                        <div class="upload-icon">📄</div>
+                        <h3 class="upload-title">Click to upload PDF</h3>
+                        <p class="upload-subtitle">or drag and drop your file here</p>
+                        <input type="file" id="pdfInput" class="file-input" accept=".pdf">
+                    </div>
+                </div>
+                
+                <div class="content-footer">
+                    <div></div>
+                    <button class="nav-button primary" disabled data-next="2">
+                        Continue
+                        <span>→</span>
+                    </button>
+                </div>
+            </div>
+            
+            <!-- Step 2: Background Removal -->
+            <div class="step-content-panel" data-step="2" style="display: none;">
+                <div class="content-header">
+                    <h2 class="content-title">Remove Background Elements</h2>
+                    <p class="content-description">Select areas to remove or keep from your PDF</p>
+                </div>
+                
+                <div class="content-body">
+                    <div class="removal-container">
+                        <div class="pdf-preview">
+                            <div class="preview-header">
+                                <h3 class="preview-title">PDF Preview</h3>
+                                <div class="preview-tools">
+                                    <button class="tool-button" onclick="zoomIn()">
+                                        <span>🔍</span>
+                                        Zoom In
+                                    </button>
+                                    <button class="tool-button" onclick="zoomOut()">
+                                        <span>🔍</span>
+                                        Zoom Out
+                                    </button>
+                                    <button class="tool-button" onclick="resetView()">
+                                        <span>↻</span>
+                                        Reset
+                                    </button>
+                                </div>
+                            </div>
+                            <div class="pdf-viewer">
+                                <div class="pdf-container">
+                                    <img class="pdf-image" style="display: none;">
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div class="removal-sidebar">
+                            <div class="mode-selector">
+                                <button class="mode-option active" data-mode="remove">Remove Areas</button>
+                                <button class="mode-option" data-mode="keep">Keep Areas</button>
+                            </div>
+                            
+                            <div class="instructions">
+                                <h4 class="instructions-title">
+                                    <span>💡</span>
+                                    How to use
+                                </h4>
+                                <p class="instructions-text">
+                                    Click and drag on the PDF to select areas. In "Remove" mode, selected areas will be deleted. In "Keep" mode, only selected areas will be preserved.
+                                </p>
+                            </div>
+                            
+                            <div class="selection-info">
+                                <p class="info-label">Selected areas</p>
+                                <p class="info-value">0</p>
+                            </div>
+                            
+                            <div class="action-buttons">
+                                <button class="action-button preview" onclick="showPreview()">
+                                    Preview Result
+                                </button>
+                                <button class="action-button clear" onclick="clearSelections()">
+                                    Clear All Selections
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="content-footer">
+                    <button class="nav-button secondary" data-prev="1">
+                        <span>←</span>
+                        Back
+                    </button>
+                    <button class="nav-button primary" data-next="3">
+                        Apply & Continue
+                        <span>→</span>
+                    </button>
+                </div>
+            </div>
+            
+            <!-- Step 3: Reference Points -->
+            <div class="step-content-panel" data-step="3" style="display: none;">
+                <div class="content-header">
+                    <h2 class="content-title">Set Reference Points</h2>
+                    <p class="content-description">Click on your PDF and map to define two georeferencing points</p>
+                </div>
+                
+                <div class="content-body">
+                    <div class="reference-container">
+                        <div class="reference-pdf">
+                            <h3 class="preview-title">PDF Plan</h3>
+                            <div class="pdf-viewer">
+                                <div class="pdf-container">
+                                    <img class="pdf-image" style="display: none;">
+                                    <div class="crosshair"></div>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div class="reference-map">
+                            <h3 class="preview-title">Map View</h3>
+                            <div class="map-container">
+                                <div id="map"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="content-footer">
+                    <button class="nav-button secondary" data-prev="2">
+                        <span>←</span>
+                        Back
+                    </button>
+                    <button class="nav-button primary" disabled data-next="4">
+                        Continue
+                        <span>→</span>
+                    </button>
+                </div>
+            </div>
+            
+            <!-- Step 4: Review & Export -->
+            <div class="step-content-panel" data-step="4" style="display: none;">
+                <div class="content-header">
+                    <h2 class="content-title">Review & Export</h2>
+                    <p class="content-description">Preview your georeferenced plan and export the results</p>
+                </div>
+                
+                <div class="content-body">
+                    <div class="review-container">
+                        <div class="review-map">
+                            <div class="map-container" style="height: 100%;">
+                                <div id="review-map" style="width: 100%; height: 100%;"></div>
+                            </div>
+                        </div>
+                        
+                        <div class="review-sidebar">
+                            <div class="opacity-control">
+                                <div class="opacity-label">
+                                    Plan Opacity
+                                    <span class="opacity-value">70%</span>
+                                </div>
+                                <input type="range" class="opacity-slider" min="0" max="100" value="70">
+                            </div>
+                            
+                            <div class="export-options">
+                                <h3 class="export-title">Export Options</h3>
+                                <div class="export-buttons">
+                                    <button class="export-button" onclick="exportGeoTIFF()">
+                                        <span>GeoTIFF</span>
+                                        <span class="export-format">.tif</span>
+                                    </button>
+                                    <button class="export-button" onclick="exportKML()">
+                                        <span>Google Earth</span>
+                                        <span class="export-format">.kml</span>
+                                    </button>
+                                    <button class="export-button" onclick="exportWorldFile()">
+                                        <span>World File</span>
+                                        <span class="export-format">.pgw</span>
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="content-footer">
+                    <button class="nav-button secondary" data-prev="3">
+                        <span>←</span>
+                        Back
+                    </button>
+                    <button class="nav-button primary" onclick="completeWizard()">
+                        Complete
+                        <span>✓</span>
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Preview Overlay -->
+    <div class="preview-overlay">
+        <div class="preview-modal">
+            <div class="preview-header">
+                <h3 class="preview-title">Preview</h3>
+                <button class="preview-close" onclick="closePreview()">×</button>
+            </div>
+            <div class="preview-body">
+                <canvas class="preview-canvas"></canvas>
+            </div>
+            <div class="preview-footer">
+                <button class="nav-button secondary" onclick="closePreview()">Cancel</button>
+                <button class="nav-button primary" onclick="applyChanges()">Apply Changes</button>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Coordinate Dialog -->
+    <div class="overlay"></div>
+    <div class="coord-dialog">
+        <div class="coord-dialog-header">
+            <h3 class="coord-dialog-title">Set Reference Point <span class="point-number">1</span></h3>
+            <p class="coord-dialog-subtitle">Click on the map or enter coordinates manually</p>
+        </div>
+        
+        <div class="coord-system-selector">
+            <label class="coord-system-label">Coordinate System</label>
+            <select class="coord-system-select" id="coordSystem">
+                <option value="wgs84">WGS84 (GPS - Lat/Lon)</option>
+                <option value="local">Local Coordinates (X/Y)</option>
+                <option value="epsg:31256">Austria GK West (EPSG:31256)</option>
+                <option value="epsg:31257">Austria GK Central (EPSG:31257)</option>
+                <option value="epsg:31258">Austria GK East (EPSG:31258)</option>
+            </select>
+        </div>
+        
+        <div class="coord-dialog-inputs">
+            <div class="coord-input">
+                <label class="coord-label-1">Longitude / Easting (X)</label>
+                <input type="text" class="coord-1" placeholder="e.g., 16.3738">
+            </div>
+            <div class="coord-input">
+                <label class="coord-label-2">Latitude / Northing (Y)</label>
+                <input type="text" class="coord-2" placeholder="e.g., 48.2082">
+            </div>
+        </div>
+        
+        <div class="coord-dialog-buttons">
+            <button class="nav-button secondary" onclick="cancelCoordinate()">Cancel</button>
+            <button class="nav-button primary" onclick="confirmCoordinate()">Confirm</button>
+        </div>
+    </div>
+    
+    <script>
+        // Initialize PDF.js
+        pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+        
+        // Global state
+        let currentStep = 1;
+        let pdfData = {
+            originalUrl: null,
+            processedUrl: null,
+            aspectRatio: 1,
+            width: 0,
+            height: 0
+        };
+        let referencePoints = [];
+        let currentPoint = 0;
+        let map = null;
+        let reviewMap = null;
+        let selectionState = {
+            mode: 'remove',
+            selections: [],
+            isSelecting: false,
+            canvas: null,
+            ctx: null
+        };
+        
+        // Initialize
+        document.addEventListener('DOMContentLoaded', () => {
+            setupEventListeners();
+            initializeMaps();
+        });
+        
+        // Setup event listeners
+        function setupEventListeners() {
+            // Navigation buttons
+            document.querySelectorAll('.nav-button').forEach(btn => {
+                btn.addEventListener('click', handleNavigation);
+            });
+            
+            // File upload
+            const uploadArea = document.querySelector('.upload-area');
+            const fileInput = document.getElementById('pdfInput');
+            
+            uploadArea.addEventListener('dragover', (e) => {
+                e.preventDefault();
+                uploadArea.classList.add('dragover');
+            });
+            
+            uploadArea.addEventListener('dragleave', () => {
+                uploadArea.classList.remove('dragover');
+            });
+            
+            uploadArea.addEventListener('drop', (e) => {
+                e.preventDefault();
+                uploadArea.classList.remove('dragover');
+                handleFileUpload(e.dataTransfer.files[0]);
+            });
+            
+            fileInput.addEventListener('change', (e) => {
+                handleFileUpload(e.target.files[0]);
+            });
+            
+            // Mode selector
+            document.querySelectorAll('.mode-option').forEach(btn => {
+                btn.addEventListener('click', (e) => {
+                    document.querySelectorAll('.mode-option').forEach(b => b.classList.remove('active'));
+                    e.target.classList.add('active');
+                    selectionState.mode = e.target.dataset.mode;
+                });
+            });
+            
+            // Opacity slider
+            document.querySelector('.opacity-slider').addEventListener('input', (e) => {
+                const value = e.target.value;
+                document.querySelector('.opacity-value').textContent = value + '%';
+                updateOverlayOpacity(value);
+            });
+        }
+        
+        // Navigation handler
+        function handleNavigation(e) {
+            const btn = e.currentTarget;
+            const nextStep = btn.dataset.next;
+            const prevStep = btn.dataset.prev;
+            
+            if (nextStep) {
+                goToStep(parseInt(nextStep));
+            } else if (prevStep) {
+                goToStep(parseInt(prevStep));
+            }
+        }
+        
+        // Step navigation
+        function goToStep(step) {
+            // Hide current step
+            document.querySelector(`.step-content-panel[data-step="${currentStep}"]`).style.display = 'none';
+            document.querySelector(`.step-item[data-step="${currentStep}"]`).classList.remove('active');
+            
+            // Mark completed steps
+            if (step > currentStep) {
+                for (let i = currentStep; i < step; i++) {
+                    document.querySelector(`.step-item[data-step="${i}"]`).classList.add('completed');
+                }
+            }
+            
+            // Show new step
+            currentStep = step;
+            document.querySelector(`.step-content-panel[data-step="${currentStep}"]`).style.display = 'flex';
+            document.querySelector(`.step-item[data-step="${currentStep}"]`).classList.add('active');
+            
+            // Initialize step-specific features
+            if (step === 2) {
+                initializeSelectionMode();
+            } else if (step === 3) {
+                initializeReferenceMode();
+            } else if (step === 4) {
+                initializeReviewMode();
+            }
+        }
+        
+        // Handle file upload
+        async function handleFileUpload(file) {
+            if (!file || file.type !== 'application/pdf') {
+                alert('Please upload a PDF file');
+                return;
+            }
+            
+            try {
+                // Show loading state
+                const uploadArea = document.querySelector('.upload-area');
+                uploadArea.innerHTML = '<div class="loading-spinner"></div><p>Processing PDF...</p>';
+                
+                // Convert PDF to image
+                const arrayBuffer = await file.arrayBuffer();
+                const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+                const page = await pdf.getPage(1);
+                
+                const scale = 2;
+                const viewport = page.getViewport({ scale });
+                
+                const canvas = document.createElement('canvas');
+                const context = canvas.getContext('2d');
+                canvas.width = viewport.width;
+                canvas.height = viewport.height;
+                
+                await page.render({
+                    canvasContext: context,
+                    viewport: viewport
+                }).promise;
+                
+                // Store PDF data
+                pdfData.originalUrl = canvas.toDataURL('image/png');
+                pdfData.processedUrl = pdfData.originalUrl;
+                pdfData.width = canvas.width;
+                pdfData.height = canvas.height;
+                pdfData.aspectRatio = canvas.width / canvas.height;
+                
+                // Enable continue button
+                document.querySelector('[data-next="2"]').disabled = false;
+                
+                // Update upload area
+                uploadArea.innerHTML = `
+                    <div class="upload-icon" style="background: #f0fdf4;">✓</div>
+                    <h3 class="upload-title">PDF Uploaded Successfully</h3>
+                    <p class="upload-subtitle">${file.name}</p>
+                `;
+                
+            } catch (error) {
+                console.error('Error processing PDF:', error);
+                alert('Error processing PDF. Please try another file.');
+            }
+        }
+        
+        // Initialize selection mode for step 2
+        function initializeSelectionMode() {
+            const pdfImage = document.querySelector('.step-content-panel[data-step="2"] .pdf-image');
+            pdfImage.src = pdfData.processedUrl;
+            pdfImage.style.display = 'block';
+            
+            // Create selection canvas
+            setTimeout(() => {
+                createSelectionCanvas();
+            }, 100);
+        }
+        
+        // Create selection canvas
+        function createSelectionCanvas() {
+            const pdfContainer = document.querySelector('.step-content-panel[data-step="2"] .pdf-container');
+            const pdfImage = document.querySelector('.step-content-panel[data-step="2"] .pdf-image');
+            
+            // Remove existing canvas if any
+            if (selectionState.canvas) {
+                selectionState.canvas.remove();
+            }
+            
+            // Create new canvas
+            const canvas = document.createElement('canvas');
+            canvas.className = 'selection-canvas';
+            canvas.width = pdfImage.naturalWidth || pdfImage.width;
+            canvas.height = pdfImage.naturalHeight || pdfImage.height;
+            canvas.style.width = pdfImage.width + 'px';
+            canvas.style.height = pdfImage.height + 'px';
+            
+            pdfContainer.appendChild(canvas);
+            
+            selectionState.canvas = canvas;
+            selectionState.ctx = canvas.getContext('2d');
+            
+            // Add event listeners
+            canvas.addEventListener('mousedown', startSelection);
+            canvas.addEventListener('mousemove', updateSelection);
+            canvas.addEventListener('mouseup', endSelection);
+        }
+        
+        // Selection handlers
+        function startSelection(e) {
+            const rect = e.target.getBoundingClientRect();
+            const scaleX = e.target.width / rect.width;
+            const scaleY = e.target.height / rect.height;
+            
+            selectionState.isSelecting = true;
+            selectionState.startX = (e.clientX - rect.left) * scaleX;
+            selectionState.startY = (e.clientY - rect.top) * scaleY;
+        }
+        
+        function updateSelection(e) {
+            if (!selectionState.isSelecting) return;
+            
+            const rect = e.target.getBoundingClientRect();
+            const scaleX = e.target.width / rect.width;
+            const scaleY = e.target.height / rect.height;
+            
+            const currentX = (e.clientX - rect.left) * scaleX;
+            const currentY = (e.clientY - rect.top) * scaleY;
+            
+            // Clear and redraw
+            const ctx = selectionState.ctx;
+            ctx.clearRect(0, 0, selectionState.canvas.width, selectionState.canvas.height);
+            
+            // Draw existing selections
+            drawSelections();
+            
+            // Draw current selection
+            ctx.fillStyle = 'rgba(59, 130, 246, 0.2)';
+            ctx.strokeStyle = '#3b82f6';
+            ctx.lineWidth = 2;
+            ctx.setLineDash([5, 5]);
+            
+            const x = Math.min(selectionState.startX, currentX);
+            const y = Math.min(selectionState.startY, currentY);
+            const width = Math.abs(currentX - selectionState.startX);
+            const height = Math.abs(currentY - selectionState.startY);
+            
+            ctx.fillRect(x, y, width, height);
+            ctx.strokeRect(x, y, width, height);
+            ctx.setLineDash([]);
+        }
+        
+        function endSelection(e) {
+            if (!selectionState.isSelecting) return;
+            
+            selectionState.isSelecting = false;
+            
+            const rect = e.target.getBoundingClientRect();
+            const scaleX = e.target.width / rect.width;
+            const scaleY = e.target.height / rect.height;
+            
+            const endX = (e.clientX - rect.left) * scaleX;
+            const endY = (e.clientY - rect.top) * scaleY;
+            
+            // Only add if meaningful size
+            const width = Math.abs(endX - selectionState.startX);
+            const height = Math.abs(endY - selectionState.startY);
+            
+            if (width > 5 && height > 5) {
+                selectionState.selections.push({
+                    x: Math.min(selectionState.startX, endX),
+                    y: Math.min(selectionState.startY, endY),
+                    width: width,
+                    height: height
+                });
+                
+                updateSelectionInfo();
+            }
+            
+            drawSelections();
+        }
+        
+        function drawSelections() {
+            const ctx = selectionState.ctx;
+            ctx.clearRect(0, 0, selectionState.canvas.width, selectionState.canvas.height);
+            
+            selectionState.selections.forEach(sel => {
+                if (selectionState.mode === 'remove') {
+                    ctx.fillStyle = 'rgba(239, 68, 68, 0.3)';
+                    ctx.strokeStyle = '#ef4444';
+                } else {
+                    ctx.fillStyle = 'rgba(16, 185, 129, 0.3)';
+                    ctx.strokeStyle = '#10b981';
+                }
+                
+                ctx.lineWidth = 2;
+                ctx.fillRect(sel.x, sel.y, sel.width, sel.height);
+                ctx.strokeRect(sel.x, sel.y, sel.width, sel.height);
+            });
+        }
+        
+        function updateSelectionInfo() {
+            document.querySelector('.info-value').textContent = selectionState.selections.length;
+        }
+        
+        function clearSelections() {
+            selectionState.selections = [];
+            drawSelections();
+            updateSelectionInfo();
+        }
+        
+        function showPreview() {
+            // Create preview
+            const canvas = document.createElement('canvas');
+            const ctx = canvas.getContext('2d');
+            const img = new Image();
+            
+            img.onload = () => {
+                canvas.width = img.width;
+                canvas.height = img.height;
+                
+                if (selectionState.mode === 'keep') {
+                    // Keep mode - start with transparent
+                    ctx.clearRect(0, 0, canvas.width, canvas.height);
+                    
+                    // Draw only selected areas
+                    selectionState.selections.forEach(sel => {
+                        ctx.drawImage(img, sel.x, sel.y, sel.width, sel.height, sel.x, sel.y, sel.width, sel.height);
+                    });
+                } else {
+                    // Remove mode - start with full image
+                    ctx.drawImage(img, 0, 0);
+                    
+                    // Clear selected areas
+                    ctx.save();
+                    ctx.globalCompositeOperation = 'destination-out';
+                    selectionState.selections.forEach(sel => {
+                        ctx.fillRect(sel.x, sel.y, sel.width, sel.height);
+                    });
+                    ctx.restore();
+                }
+                
+                // Show preview
+                const previewCanvas = document.querySelector('.preview-canvas');
+                const previewCtx = previewCanvas.getContext('2d');
+                
+                // Scale to fit
+                const maxWidth = window.innerWidth * 0.7;
+                const maxHeight = window.innerHeight * 0.7;
+                const scale = Math.min(maxWidth / canvas.width, maxHeight / canvas.height, 1);
+                
+                previewCanvas.width = canvas.width * scale;
+                previewCanvas.height = canvas.height * scale;
+                
+                previewCtx.drawImage(canvas, 0, 0, previewCanvas.width, previewCanvas.height);
+                
+                document.querySelector('.preview-overlay').style.display = 'flex';
+            };
+            
+            img.src = pdfData.originalUrl;
+        }
+        
+        function closePreview() {
+            document.querySelector('.preview-overlay').style.display = 'none';
+        }
+        
+        function applyChanges() {
+            // Apply selections to create processed image
+            const canvas = document.createElement('canvas');
+            const ctx = canvas.getContext('2d');
+            const img = new Image();
+            
+            img.onload = () => {
+                canvas.width = img.width;
+                canvas.height = img.height;
+                
+                if (selectionState.mode === 'keep') {
+                    ctx.clearRect(0, 0, canvas.width, canvas.height);
+                    selectionState.selections.forEach(sel => {
+                        ctx.drawImage(img, sel.x, sel.y, sel.width, sel.height, sel.x, sel.y, sel.width, sel.height);
+                    });
+                } else {
+                    ctx.drawImage(img, 0, 0);
+                    ctx.save();
+                    ctx.globalCompositeOperation = 'destination-out';
+                    selectionState.selections.forEach(sel => {
+                        ctx.fillRect(sel.x, sel.y, sel.width, sel.height);
+                    });
+                    ctx.restore();
+                }
+                
+                pdfData.processedUrl = canvas.toDataURL('image/png');
+                closePreview();
+                goToStep(3);
+            };
+            
+            img.src = pdfData.originalUrl;
+        }
+        
+        // Initialize maps
+        function initializeMaps() {
+            // Wait for container to be ready
+            setTimeout(() => {
+                // Initialize reference map
+                const mapContainer = document.getElementById('map');
+                if (mapContainer) {
+                    map = new maplibregl.Map({
+                        container: mapContainer,
+                        style: 'https://gis.ktn.gv.at/osgdi/styles/basemap_ktn_vektor.json',
+                        center: [14.222929599999969, 46.62632869999987],
+                        zoom: 13
+                    });
+                    
+                    map.addControl(new maplibregl.NavigationControl());
+                }
+            }, 500);
+        }
+        
+        // Initialize reference mode for step 3
+        function initializeReferenceMode() {
+            const pdfImage = document.querySelector('.step-content-panel[data-step="3"] .pdf-image');
+            pdfImage.src = pdfData.processedUrl;
+            pdfImage.style.display = 'block';
+            
+            // Reset reference points
+            referencePoints = [];
+            currentPoint = 0;
+            
+            // Start reference point selection
+            setTimeout(() => {
+                startReferenceSelection();
+            }, 100);
+        }
+        
+        function startReferenceSelection() {
+            const pdfContainer = document.querySelector('.step-content-panel[data-step="3"] .pdf-container');
+            const crosshair = document.querySelector('.crosshair');
+            
+            crosshair.style.display = 'block';
+            
+            // Update crosshair on mouse move
+            pdfContainer.addEventListener('mousemove', (e) => {
+                const rect = pdfContainer.getBoundingClientRect();
+                crosshair.style.left = (e.clientX - rect.left) + 'px';
+                crosshair.style.top = (e.clientY - rect.top) + 'px';
+            });
+            
+            // Handle click
+            pdfContainer.addEventListener('click', handleReferenceClick);
+        }
+        
+        function handleReferenceClick(e) {
+            const pdfContainer = e.currentTarget;
+            const pdfImage = pdfContainer.querySelector('.pdf-image');
+            const rect = pdfImage.getBoundingClientRect();
+            
+            const x = (e.clientX - rect.left) / rect.width;
+            const y = (e.clientY - rect.top) / rect.height;
+            
+            // Add marker
+            const marker = document.createElement('div');
+            marker.className = 'reference-point';
+            marker.style.left = (e.clientX - pdfContainer.getBoundingClientRect().left) + 'px';
+            marker.style.top = (e.clientY - pdfContainer.getBoundingClientRect().top) + 'px';
+            
+            const label = document.createElement('div');
+            label.className = 'reference-label';
+            label.textContent = `Point ${currentPoint + 1}`;
+            marker.appendChild(label);
+            
+            pdfContainer.appendChild(marker);
+            
+            // Show coordinate dialog
+            showCoordinateDialog(x, y);
+        }
+        
+        function showCoordinateDialog(x, y) {
+            document.querySelector('.overlay').style.display = 'block';
+            document.querySelector('.coord-dialog').style.display = 'block';
+            document.querySelector('.point-number').textContent = currentPoint + 1;
+            
+            // Store current point
+            window.currentPdfPoint = { x, y };
+            
+            // Enable map clicking
+            map.getCanvas().style.cursor = 'crosshair';
+            map.once('click', (e) => {
+                const coords = e.lngLat;
+                document.querySelector('.coord-1').value = coords.lng.toFixed(6);
+                document.querySelector('.coord-2').value = coords.lat.toFixed(6);
+                map.getCanvas().style.cursor = '';
+            });
+        }
+        
+        function cancelCoordinate() {
+            document.querySelector('.overlay').style.display = 'none';
+            document.querySelector('.coord-dialog').style.display = 'none';
+            map.getCanvas().style.cursor = '';
+        }
+        
+        function confirmCoordinate() {
+            const coord1 = parseFloat(document.querySelector('.coord-1').value);
+            const coord2 = parseFloat(document.querySelector('.coord-2').value);
+            
+            if (isNaN(coord1) || isNaN(coord2)) {
+                alert('Please enter valid coordinates');
+                return;
+            }
+            
+            referencePoints.push({
+                pdf: window.currentPdfPoint,
+                world: { x: coord1, y: coord2 },
+                coordSystem: document.getElementById('coordSystem').value
+            });
+            
+            cancelCoordinate();
+            currentPoint++;
+            
+            if (currentPoint >= 2) {
+                // Enable continue button
+                document.querySelector('[data-next="4"]').disabled = false;
+            }
+        }
+        
+        // Initialize review mode for step 4
+        function initializeReviewMode() {
+            // Create review map if not exists
+            if (!reviewMap) {
+                const reviewMapContainer = document.getElementById('review-map');
+                reviewMap = new maplibregl.Map({
+                    container: reviewMapContainer,
+                    style: 'https://gis.ktn.gv.at/osgdi/styles/basemap_ktn_vektor.json',
+                    center: [14.222929599999969, 46.62632869999987],
+                    zoom: 13
+                });
+                
+                reviewMap.addControl(new maplibregl.NavigationControl());
+            }
+            
+            // Add georeferenced overlay
+            reviewMap.on('load', () => {
+                addGeoreferencedOverlay();
+            });
+            
+            if (reviewMap.loaded()) {
+                addGeoreferencedOverlay();
+            }
+        }
+        
+        function addGeoreferencedOverlay() {
+            // Calculate transformation and add overlay
+            // (Implementation similar to original calculateAndDisplayOverlay function)
+            console.log('Adding georeferenced overlay with points:', referencePoints);
+        }
+        
+        function updateOverlayOpacity(value) {
+            if (reviewMap && reviewMap.getLayer('pdf-overlay')) {
+                reviewMap.setPaintProperty('pdf-overlay', 'raster-opacity', parseFloat(value) / 100);
+            }
+        }
+        
+        // Export functions
+        function exportGeoTIFF() {
+            alert('Exporting as GeoTIFF...');
+        }
+        
+        function exportKML() {
+            alert('Exporting as KML...');
+        }
+        
+        function exportWorldFile() {
+            alert('Exporting World File...');
+        }
+        
+        function completeWizard() {
+            alert('Georeferencing complete! Your files have been saved.');
+        }
+        
+        // Zoom functions
+        function zoomIn() {
+            // Implement zoom in
+        }
+        
+        function zoomOut() {
+            // Implement zoom out
+        }
+        
+        function resetView() {
+            // Implement reset view
+        }
+    </script>
+</body>
+</html>
