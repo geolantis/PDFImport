@@ -1,0 +1,1950 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PDF Plan 2-Point Georeferencing</title>
+    <script src='https://unpkg.com/maplibre-gl@3.6.2/dist/maplibre-gl.js'></script>
+    <link href='https://unpkg.com/maplibre-gl@3.6.2/dist/maplibre-gl.css' rel='stylesheet' />
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+    <style>
+        body { margin: 0; padding: 0; font-family: Arial, sans-serif; }
+        
+        .container {
+            display: flex;
+            height: 100vh;
+        }
+        
+        .pdf-panel {
+            width: 50%;
+            position: relative;
+            background: #f3f4f6;
+            overflow: hidden;
+        }
+        
+        .map-panel {
+            width: 50%;
+            position: relative;
+        }
+        
+        #map {
+            width: 100%;
+            height: 100%;
+        }
+        
+        .pdf-viewer {
+            position: relative;
+            width: 100%;
+            height: 100%;
+            overflow: auto;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        
+        .pdf-container {
+            position: relative;
+            display: inline-block;
+        }
+        
+        .pdf-image {
+            max-width: 100%;
+            display: block;
+        }
+        
+        .controls {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            background: white;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            padding: 15px 20px;
+            z-index: 10;
+        }
+        
+        .upload-btn, .start-georef-btn, .process-btn {
+            background: #3b82f6;
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+            margin-right: 10px;
+        }
+        
+        .upload-btn:hover, .start-georef-btn:hover, .process-btn:hover {
+            background: #2563eb;
+        }
+        
+        .process-btn {
+            background: #10b981;
+        }
+        
+        .process-btn:hover {
+            background: #059669;
+        }
+        
+        input[type="file"] {
+            display: none;
+        }
+        
+        .crosshair {
+            position: absolute;
+            width: 60px;
+            height: 60px;
+            pointer-events: none;
+            display: none;
+            transform: translate(-50%, -50%);
+        }
+        
+        .crosshair::before,
+        .crosshair::after {
+            content: '';
+            position: absolute;
+            background: #ef4444;
+        }
+        
+        .crosshair::before {
+            width: 2px;
+            height: 100%;
+            left: 50%;
+            transform: translateX(-50%);
+        }
+        
+        .crosshair::after {
+            width: 100%;
+            height: 2px;
+            top: 50%;
+            transform: translateY(-50%);
+        }
+        
+        .georef-dialog {
+            position: fixed;
+            top: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: white;
+            padding: 30px;
+            border-radius: 8px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.2);
+            z-index: 100;
+            display: none;
+            min-width: 400px;
+            max-width: 500px;
+            pointer-events: auto; /* Ensure dialog is clickable */
+        }
+        
+        .overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0,0,0,0.3);
+            z-index: 99;
+            display: none;
+            pointer-events: none; /* Allow clicks to pass through */
+        }
+        
+        .georef-dialog h3 {
+            margin: 0 0 20px 0;
+            font-size: 20px;
+        }
+        
+        .coord-input {
+            margin-bottom: 15px;
+        }
+        
+        .coord-input label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: 500;
+        }
+        
+        .coord-input input {
+            width: 100%;
+            padding: 8px;
+            border: 1px solid #d1d5db;
+            border-radius: 4px;
+            font-size: 14px;
+        }
+        
+        .dialog-buttons {
+            display: flex;
+            gap: 10px;
+            margin-top: 20px;
+        }
+        
+        .dialog-buttons button {
+            flex: 1;
+            padding: 10px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+        }
+        
+        .btn-primary {
+            background: #3b82f6;
+            color: white;
+        }
+        
+        .btn-primary:hover {
+            background: #2563eb;
+        }
+        
+        .btn-secondary {
+            background: #e5e7eb;
+            color: #374151;
+        }
+        
+        .btn-secondary:hover {
+            background: #d1d5db;
+        }
+        
+        .reference-point {
+            position: absolute;
+            width: 20px;
+            height: 20px;
+            background: #ef4444;
+            border: 2px solid white;
+            border-radius: 50%;
+            transform: translate(-50%, -50%);
+            box-shadow: 0 2px 4px rgba(0,0,0,0.3);
+        }
+        
+        .reference-label {
+            position: absolute;
+            top: -25px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: #ef4444;
+            color: white;
+            padding: 2px 8px;
+            border-radius: 3px;
+            font-size: 12px;
+            white-space: nowrap;
+        }
+        
+        .status-bar {
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            background: white;
+            padding: 10px 20px;
+            box-shadow: 0 -2px 4px rgba(0,0,0,0.1);
+            font-size: 14px;
+            z-index: 10;
+        }
+        
+        .coordinate-system-selector {
+            margin-bottom: 15px;
+        }
+        
+        .coordinate-system-selector select {
+            width: 100%;
+            padding: 8px;
+            border: 1px solid #d1d5db;
+            border-radius: 4px;
+            font-size: 14px;
+        }
+        
+        .opacity-control {
+            position: absolute;
+            top: 80px;
+            right: 20px;
+            background: white;
+            padding: 15px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            z-index: 10;
+            display: none;
+        }
+        
+        .opacity-slider {
+            width: 150px;
+        }
+        
+        /* Selection mode styles */
+        .selection-toolbar {
+            position: absolute;
+            top: 65px;
+            left: 0;
+            right: 0;
+            background: white;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            padding: 10px 20px;
+            z-index: 10;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        .mode-selector {
+            display: flex;
+            gap: 10px;
+        }
+        
+        .mode-btn {
+            background: #e5e7eb;
+            color: #374151;
+            border: none;
+            padding: 6px 12px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+            transition: all 0.2s;
+        }
+        
+        .mode-btn:hover {
+            background: #d1d5db;
+        }
+        
+        .mode-btn.active {
+            background: #3b82f6;
+            color: white;
+        }
+        
+        .selection-actions {
+            display: flex;
+            gap: 8px;
+        }
+        
+        .action-btn {
+            background: #f3f4f6;
+            color: #374151;
+            border: 1px solid #d1d5db;
+            padding: 6px 12px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+            transition: all 0.2s;
+        }
+        
+        .action-btn:hover {
+            background: #e5e7eb;
+        }
+        
+        .action-btn.apply-btn {
+            background: #10b981;
+            color: white;
+            border: none;
+        }
+        
+        .action-btn.apply-btn:hover {
+            background: #059669;
+        }
+        
+        .selection-instructions {
+            position: absolute;
+            top: 120px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: #fef3c7;
+            padding: 8px 16px;
+            border-radius: 4px;
+            font-size: 14px;
+            color: #92400e;
+            z-index: 10;
+        }
+        
+        .preview-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0,0,0,0.8);
+            z-index: 200;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        
+        .preview-content {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            max-width: 80%;
+            max-height: 80%;
+            overflow: auto;
+        }
+        
+        .preview-content h3 {
+            margin: 0 0 15px 0;
+            font-size: 18px;
+        }
+        
+        .preview-canvas {
+            display: block;
+            max-width: 100%;
+            border: 1px solid #e5e7eb;
+            margin-bottom: 15px;
+        }
+        
+        .preview-actions {
+            display: flex;
+            gap: 10px;
+            justify-content: flex-end;
+        }
+        
+        .close-preview-btn, .confirm-preview-btn {
+            padding: 8px 16px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+        }
+        
+        /* Selection mode interface styles */
+        .selection-toolbar {
+            position: fixed;
+            top: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: white;
+            padding: 20px;
+            border-radius: 12px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.15);
+            z-index: 1000;
+            display: none;
+            min-width: 600px;
+        }
+        
+        .selection-toolbar.active {
+            display: block;
+        }
+        
+        .mode-selector {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 15px;
+            background: #f3f4f6;
+            padding: 5px;
+            border-radius: 8px;
+        }
+        
+        .mode-button {
+            padding: 10px 20px;
+            border: none;
+            background: transparent;
+            color: #6b7280;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 500;
+            transition: all 0.2s;
+        }
+        
+        .mode-button:hover {
+            background: #e5e7eb;
+        }
+        
+        .mode-button.active {
+            background: white;
+            color: #1f2937;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        }
+        
+        .selection-actions {
+            display: flex;
+            gap: 10px;
+            justify-content: space-between;
+        }
+        
+        .action-button {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 500;
+            transition: all 0.2s;
+        }
+        
+        .action-button:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+        }
+        
+        .action-button.cancel {
+            background: #e5e7eb;
+            color: #374151;
+        }
+        
+        .action-button.cancel:hover {
+            background: #d1d5db;
+        }
+        
+        .action-button.clear {
+            background: #fef3c7;
+            color: #92400e;
+        }
+        
+        .action-button.clear:hover {
+            background: #fde68a;
+        }
+        
+        .action-button.extract {
+            background: #10b981;
+            color: white;
+        }
+        
+        .action-button.extract:hover {
+            background: #059669;
+        }
+        
+        .action-button.extract:disabled {
+            background: #d1d5db;
+            color: #9ca3af;
+            cursor: not-allowed;
+            transform: none;
+        }
+        
+        .selection-canvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            pointer-events: none;
+            z-index: 100;
+        }
+        
+        .preview-overlay {
+            position: absolute;
+            background: rgba(59, 130, 246, 0.1);
+            border: 2px solid #3b82f6;
+            pointer-events: none;
+            z-index: 99;
+            transition: all 0.1s;
+        }
+        
+        .selection-instructions {
+            background: #eff6ff;
+            padding: 12px 16px;
+            border-radius: 8px;
+            font-size: 14px;
+            color: #1e40af;
+            margin-bottom: 15px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        
+        .selection-instructions::before {
+            content: '💡';
+            font-size: 18px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="pdf-panel">
+            <div class="controls">
+                <label for="pdfInput" class="upload-btn">
+                    Upload PDF Plan
+                </label>
+                <input type="file" id="pdfInput" accept=".pdf">
+                <button class="process-btn" style="display: none;">Remove Legend/Frame</button>
+                <button class="start-georef-btn" style="display: none;">Start 2-Point Referencing</button>
+                <span class="status-text">Upload a PDF to begin</span>
+            </div>
+            
+            <!-- Selection toolbar for area selection mode -->
+            <div class="selection-toolbar" style="display: none;">
+                <div class="mode-selector">
+                    <button class="mode-btn remove-mode active" data-mode="remove">Remove Areas</button>
+                    <button class="mode-btn keep-mode" data-mode="keep">Keep Areas Only</button>
+                </div>
+                <div class="selection-actions">
+                    <button class="action-btn preview-btn">Preview</button>
+                    <button class="action-btn undo-btn">Undo</button>
+                    <button class="action-btn clear-btn">Clear All</button>
+                    <button class="action-btn apply-btn">Apply</button>
+                </div>
+            </div>
+            
+            <!-- Selection instructions -->
+            <div class="selection-instructions" style="display: none;">
+                <p>Click and drag to select areas to <span class="mode-text">remove</span></p>
+            </div>
+            
+            <div class="pdf-viewer">
+                <div class="pdf-container">
+                    <img class="pdf-image" style="display: none;">
+                    <div class="crosshair"></div>
+                </div>
+            </div>
+            
+            <div class="status-bar">
+                <span class="status-info">Ready</span>
+            </div>
+        </div>
+        
+        <div class="map-panel">
+            <div id="map"></div>
+            <div class="opacity-control">
+                <label>Plan Opacity:</label>
+                <input type="range" class="opacity-slider" min="0" max="100" value="70">
+                <span class="opacity-value">70%</span>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Preview overlay for showing selection preview -->
+    <div class="preview-overlay" style="display: none;">
+        <div class="preview-content">
+            <h3>Preview</h3>
+            <canvas class="preview-canvas"></canvas>
+            <div class="preview-actions">
+                <button class="btn-secondary close-preview-btn">Close</button>
+                <button class="btn-primary confirm-preview-btn">Confirm & Apply</button>
+            </div>
+        </div>
+    </div>
+    
+    <div class="overlay"></div>
+    <div class="georef-dialog">
+        <h3>Set Reference Point <span class="point-number">1</span></h3>
+        
+        <div style="background: #e0f2fe; padding: 10px; border-radius: 4px; margin-bottom: 15px; font-size: 14px; color: #0369a1;">
+            💡 Click on the map to select coordinates automatically
+        </div>
+        
+        <div class="coordinate-system-selector">
+            <label>Coordinate System:</label>
+            <select id="coordSystem">
+                <option value="wgs84">WGS84 (GPS - Lat/Lon)</option>
+                <option value="local">Local Coordinates (X/Y)</option>
+                <option value="epsg:31256">Austria GK West (EPSG:31256)</option>
+                <option value="epsg:31257">Austria GK Central (EPSG:31257)</option>
+                <option value="epsg:31258">Austria GK East (EPSG:31258)</option>
+            </select>
+        </div>
+        
+        <div class="coord-input">
+            <label class="coord-label-1">Longitude / Easting (X):</label>
+            <input type="text" class="coord-1" placeholder="e.g., 16.3738 or 600000">
+        </div>
+        
+        <div class="coord-input">
+            <label class="coord-label-2">Latitude / Northing (Y):</label>
+            <input type="text" class="coord-2" placeholder="e.g., 48.2082 or 5340000">
+        </div>
+        
+        <div class="dialog-buttons">
+            <button class="btn-secondary cancel-btn">Cancel</button>
+            <button class="btn-primary confirm-btn">Next</button>
+        </div>
+    </div>
+
+    <script>
+        // Initialize PDF.js worker
+        pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+
+        // Wait for map container to be ready
+        const mapContainer = document.getElementById('map');
+        if (!mapContainer) {
+            console.error('Map container not found');
+        }
+
+        // Initialize map with Carinthian basemap
+        const map = new maplibregl.Map({
+            container: mapContainer,
+            style: 'https://gis.ktn.gv.at/osgdi/styles/basemap_ktn_vektor.json',
+            center: [14.222929599999969, 46.62632869999987],
+            zoom: 13
+        });
+
+        // After map loads, log success
+        map.on('load', () => {
+            console.log('Map loaded successfully');
+            
+            // Create selection canvas elements
+            createSelectionCanvas();
+            
+            // Add cadastral vector source
+            map.addSource('gst_bev-source', {
+                'type': 'vector',
+                'url': 'https://gis.ktn.gv.at/osgdi/tilesets/gst_bev.json'
+            });
+            
+            // Add parcel boundaries layer
+            map.addLayer({
+                'id': 'cadastral-parcels',
+                'type': 'line',
+                'source': 'gst_bev-source',
+                'source-layer': 'gst_bev',
+                'minzoom': 13,
+                'maxzoom': 24,
+                'paint': {
+                    'line-color': '#000000',
+                    'line-width': {
+                        'stops': [[13, 0.6], [15, 0.8]]
+                    }
+                }
+            });
+            
+            // Add parcel labels
+            map.addLayer({
+                'id': 'cadastral-labels',
+                'type': 'symbol',
+                'source': 'gst_bev-source',
+                'source-layer': 'gst_bev',
+                'minzoom': 16,
+                'maxzoom': 24,
+                'layout': {
+                    'text-field': '{knr}',
+                    'text-font': ['Open Sans Regular'],
+                    'text-size': {
+                        'stops': [[16, 10], [19, 14]]
+                    }
+                },
+                'paint': {
+                    'text-color': '#333333'
+                }
+            });
+        });
+
+        // Debug: Log any errors
+        map.on('error', (e) => {
+            console.error('Map error:', e);
+            if (e.sourceId) {
+                console.error('Source ID:', e.sourceId);
+            }
+            if (e.error) {
+                console.error('Error details:', e.error);
+            }
+        });
+
+        // Add navigation controls
+        map.addControl(new maplibregl.NavigationControl());
+
+        let pdfImageUrl = null;
+        let originalPdfUrl = null;
+        let referencePoints = [];
+        let currentPoint = 0;
+        let isSettingPoint = false;
+        let pdfBounds = null;
+        let pdfAspectRatio = 1;
+        let isProcessed = false;
+
+        // Selection state management
+        const selectionState = {
+            isSelecting: false,
+            startX: 0,
+            startY: 0,
+            endX: 0,
+            endY: 0,
+            selectionBox: null,
+            selectedFeatures: [],
+            hoveredFeature: null,
+            lastClickTime: 0,
+            clickDelay: 200,
+            mode: 'none' // 'none', 'single', 'multi', 'box'
+        };
+        
+        // Area selection state for PDF processing
+        const areaSelectionState = {
+            mode: 'remove', // 'remove' or 'keep'
+            selections: [],
+            isSelecting: false,
+            currentSelection: null,
+            canvas: null,
+            ctx: null
+        };
+
+        // Drawing style constants
+        const SELECTION_STYLES = {
+            selected: {
+                lineColor: '#ff6b6b',
+                lineWidth: 3,
+                fillColor: 'rgba(255, 107, 107, 0.2)'
+            },
+            hover: {
+                lineColor: '#4dabf7',
+                lineWidth: 2,
+                fillColor: 'rgba(77, 171, 247, 0.1)'
+            },
+            selectionBox: {
+                borderColor: '#1971c2',
+                backgroundColor: 'rgba(25, 113, 194, 0.1)'
+            }
+        };
+
+        // Create selection canvas overlay
+        function createSelectionCanvas() {
+            // Create container for selection overlay
+            const mapContainer = document.getElementById('map');
+            
+            // Create selection box element
+            const selectionBox = document.createElement('div');
+            selectionBox.id = 'selection-box';
+            selectionBox.style.cssText = `
+                position: absolute;
+                border: 2px dashed ${SELECTION_STYLES.selectionBox.borderColor};
+                background-color: ${SELECTION_STYLES.selectionBox.backgroundColor};
+                pointer-events: none;
+                display: none;
+                z-index: 1000;
+            `;
+            mapContainer.appendChild(selectionBox);
+            
+            // Store reference to selection box
+            selectionState.selectionBox = selectionBox;
+            
+            // Create feature info tooltip
+            const tooltip = document.createElement('div');
+            tooltip.id = 'feature-tooltip';
+            tooltip.style.cssText = `
+                position: absolute;
+                background: rgba(0, 0, 0, 0.8);
+                color: white;
+                padding: 8px 12px;
+                border-radius: 4px;
+                font-size: 12px;
+                pointer-events: none;
+                display: none;
+                z-index: 1001;
+                max-width: 200px;
+                white-space: nowrap;
+                overflow: hidden;
+                text-overflow: ellipsis;
+            `;
+            mapContainer.appendChild(tooltip);
+            
+            // Create selection info bar
+            const selectionInfo = document.createElement('div');
+            selectionInfo.id = 'selection-info';
+            selectionInfo.style.cssText = `
+                position: absolute;
+                bottom: 40px;
+                left: 50%;
+                transform: translateX(-50%);
+                background: white;
+                padding: 10px 20px;
+                border-radius: 4px;
+                box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+                display: none;
+                z-index: 10;
+                font-size: 14px;
+            `;
+            mapContainer.appendChild(selectionInfo);
+            
+            console.log('Selection canvas elements created');
+        }
+
+        // Rectangle drawing state
+        let drawingState = {
+            isDrawing: false,
+            startX: 0,
+            startY: 0,
+            currentRect: null,
+            rectangles: [],
+            canvas: null,
+            ctx: null,
+            mode: 'remove' // 'remove' or 'keep'
+        };
+
+        // Get mouse position relative to canvas
+        function getMousePos(canvas, e) {
+            const rect = canvas.getBoundingClientRect();
+            const scaleX = canvas.width / rect.width;
+            const scaleY = canvas.height / rect.height;
+            
+            return {
+                x: (e.clientX - rect.left) * scaleX,
+                y: (e.clientY - rect.top) * scaleY
+            };
+        }
+
+        // Handle mouse down event - start drawing rectangle
+        function handleMouseDown(e) {
+            if (!drawingState.canvas) return;
+            
+            const pos = getMousePos(drawingState.canvas, e);
+            drawingState.isDrawing = true;
+            drawingState.startX = pos.x;
+            drawingState.startY = pos.y;
+            
+            // Create new rectangle object
+            drawingState.currentRect = {
+                x: pos.x,
+                y: pos.y,
+                width: 0,
+                height: 0,
+                mode: drawingState.mode
+            };
+        }
+
+        // Handle mouse move event - update rectangle while dragging
+        function handleMouseMove(e) {
+            if (!drawingState.isDrawing || !drawingState.canvas) return;
+            
+            const pos = getMousePos(drawingState.canvas, e);
+            
+            // Calculate rectangle dimensions
+            const width = pos.x - drawingState.startX;
+            const height = pos.y - drawingState.startY;
+            
+            // Update current rectangle, handling negative dimensions
+            drawingState.currentRect = {
+                x: width < 0 ? pos.x : drawingState.startX,
+                y: height < 0 ? pos.y : drawingState.startY,
+                width: Math.abs(width),
+                height: Math.abs(height),
+                mode: drawingState.mode
+            };
+            
+            // Redraw canvas with all rectangles including current one
+            redrawCanvas();
+        }
+
+        // Handle mouse up event - finish drawing and add to rectangles array
+        function handleMouseUp(e) {
+            if (!drawingState.isDrawing || !drawingState.canvas) return;
+            
+            drawingState.isDrawing = false;
+            
+            // Only add rectangle if it has meaningful size (not just a click)
+            if (drawingState.currentRect && 
+                drawingState.currentRect.width > 5 && 
+                drawingState.currentRect.height > 5) {
+                
+                // Add completed rectangle to array
+                drawingState.rectangles.push({
+                    x: drawingState.currentRect.x,
+                    y: drawingState.currentRect.y,
+                    width: drawingState.currentRect.width,
+                    height: drawingState.currentRect.height,
+                    mode: drawingState.currentRect.mode
+                });
+                
+                // Update UI to show number of selections
+                updateSelectionCount();
+            }
+            
+            // Clear current rectangle
+            drawingState.currentRect = null;
+            
+            // Final redraw
+            redrawCanvas();
+        }
+
+        // Redraw canvas with all rectangles
+        function redrawCanvas() {
+            if (!drawingState.canvas || !drawingState.ctx) return;
+            
+            const ctx = drawingState.ctx;
+            
+            // Clear canvas
+            ctx.clearRect(0, 0, drawingState.canvas.width, drawingState.canvas.height);
+            
+            // Draw all completed rectangles
+            drawingState.rectangles.forEach(rect => {
+                drawRectangle(ctx, rect, false);
+            });
+            
+            // Draw current rectangle being drawn
+            if (drawingState.currentRect && drawingState.isDrawing) {
+                drawRectangle(ctx, drawingState.currentRect, true);
+            }
+        }
+
+        // Draw a single rectangle
+        function drawRectangle(ctx, rect, isTemporary) {
+            // Set style based on mode and temporary status
+            if (rect.mode === 'remove') {
+                ctx.fillStyle = isTemporary ? 'rgba(239, 68, 68, 0.2)' : 'rgba(239, 68, 68, 0.3)';
+                ctx.strokeStyle = isTemporary ? '#ef4444' : '#dc2626';
+            } else {
+                ctx.fillStyle = isTemporary ? 'rgba(34, 197, 94, 0.2)' : 'rgba(34, 197, 94, 0.3)';
+                ctx.strokeStyle = isTemporary ? '#22c55e' : '#16a34a';
+            }
+            
+            ctx.lineWidth = isTemporary ? 2 : 3;
+            
+            // Draw filled rectangle
+            ctx.fillRect(rect.x, rect.y, rect.width, rect.height);
+            
+            // Draw border
+            ctx.strokeRect(rect.x, rect.y, rect.width, rect.height);
+            
+            // Add dashed line style for temporary rectangles
+            if (isTemporary) {
+                ctx.setLineDash([5, 5]);
+                ctx.strokeRect(rect.x, rect.y, rect.width, rect.height);
+                ctx.setLineDash([]);
+            }
+        }
+
+        // Update selection count in UI
+        function updateSelectionCount() {
+            const count = drawingState.rectangles.length;
+            const statusText = count === 0 ? 
+                'No selections' : 
+                `${count} area${count > 1 ? 's' : ''} selected`;
+            
+            const selectionInfo = document.getElementById('selection-info');
+            if (selectionInfo) {
+                selectionInfo.textContent = statusText;
+                selectionInfo.style.display = count > 0 ? 'block' : 'none';
+            }
+        }
+
+        // Helper function to normalize rectangle coordinates
+        function normalizeRectangle(rect) {
+            return {
+                x: Math.min(rect.startX, rect.endX),
+                y: Math.min(rect.startY, rect.endY),
+                width: Math.abs(rect.endX - rect.startX),
+                height: Math.abs(rect.endY - rect.startY)
+            };
+        }
+        
+        // Apply selections to the PDF image
+        function applySelections() {
+            const pdfImage = document.querySelector('.pdf-image');
+            if (!pdfImage || !pdfImage.src) return null;
+            
+            // Create processing canvas
+            const canvas = document.createElement('canvas');
+            const ctx = canvas.getContext('2d');
+            
+            // Create image to load the PDF
+            const img = new Image();
+            
+            return new Promise((resolve) => {
+                img.onload = () => {
+                    // Set canvas size to match image
+                    canvas.width = img.naturalWidth || img.width;
+                    canvas.height = img.naturalHeight || img.height;
+                    
+                    // Calculate scale factor between display and actual size
+                    const displayWidth = pdfImage.width;
+                    const displayHeight = pdfImage.height;
+                    const scaleX = canvas.width / displayWidth;
+                    const scaleY = canvas.height / displayHeight;
+                    
+                    if (areaSelectionState.mode === 'keep') {
+                        // Keep mode: Start with transparent canvas
+                        ctx.clearRect(0, 0, canvas.width, canvas.height);
+                        
+                        // Only draw selected areas
+                        areaSelectionState.selections.forEach(selection => {
+                            const rect = normalizeRectangle(selection);
+                            
+                            // Scale rectangle to actual image size
+                            const scaledX = rect.x * scaleX;
+                            const scaledY = rect.y * scaleY;
+                            const scaledWidth = rect.width * scaleX;
+                            const scaledHeight = rect.height * scaleY;
+                            
+                            // Draw only the selected portion
+                            ctx.drawImage(img, 
+                                scaledX, scaledY, scaledWidth, scaledHeight,
+                                scaledX, scaledY, scaledWidth, scaledHeight
+                            );
+                        });
+                    } else {
+                        // Remove mode: Start with full image
+                        ctx.drawImage(img, 0, 0);
+                        
+                        // Clear selected areas
+                        ctx.save();
+                        ctx.globalCompositeOperation = 'destination-out';
+                        
+                        areaSelectionState.selections.forEach(selection => {
+                            const rect = normalizeRectangle(selection);
+                            
+                            // Scale rectangle to actual image size
+                            const scaledX = rect.x * scaleX;
+                            const scaledY = rect.y * scaleY;
+                            const scaledWidth = rect.width * scaleX;
+                            const scaledHeight = rect.height * scaleY;
+                            
+                            ctx.fillRect(scaledX, scaledY, scaledWidth, scaledHeight);
+                        });
+                        
+                        ctx.restore();
+                    }
+                    
+                    // Return processed image as data URL
+                    resolve(canvas.toDataURL('image/png'));
+                };
+                
+                img.src = pdfImage.src;
+            });
+        }
+        
+        // Handle PDF upload
+        document.getElementById('pdfInput').addEventListener('change', async (e) => {
+            const file = e.target.files[0];
+            if (!file || file.type !== 'application/pdf') {
+                alert('Please upload a PDF file');
+                return;
+            }
+
+            try {
+                // Convert PDF to image
+                const arrayBuffer = await file.arrayBuffer();
+                const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+                const page = await pdf.getPage(1);
+                
+                const scale = 2;
+                const viewport = page.getViewport({ scale });
+                
+                const canvas = document.createElement('canvas');
+                const context = canvas.getContext('2d');
+                canvas.width = viewport.width;
+                canvas.height = viewport.height;
+                
+                await page.render({
+                    canvasContext: context,
+                    viewport: viewport
+                }).promise;
+                
+                pdfImageUrl = canvas.toDataURL('image/png');
+                pdfAspectRatio = canvas.width / canvas.height;
+                
+                // Store original PDF
+                originalPdfUrl = canvas.toDataURL('image/png');
+                
+                // Display original PDF first
+                const pdfImage = document.querySelector('.pdf-image');
+                pdfImage.src = originalPdfUrl;
+                pdfImage.style.display = 'block';
+                
+                // Update UI
+                document.querySelector('.process-btn').style.display = 'inline-block';
+                document.querySelector('.status-text').textContent = file.name;
+                document.querySelector('.status-info').textContent = 'PDF loaded - Click "Remove Legend/Frame" to prepare for georeferencing';
+                
+            } catch (error) {
+                console.error('Error processing PDF:', error);
+                alert('Error processing PDF. Please try another file.');
+            }
+        });
+
+
+        // Start georeferencing
+        document.querySelector('.start-georef-btn').addEventListener('click', () => {
+            // Clear previous reference points and markers
+            referencePoints = [];
+            currentPoint = 0;
+            
+            // Remove existing markers
+            document.querySelectorAll('.reference-point').forEach(marker => marker.remove());
+            
+            // Remove existing overlay if any
+            if (map.getSource('pdf-overlay')) {
+                map.removeLayer('pdf-overlay-layer');
+                map.removeSource('pdf-overlay');
+            }
+            
+            startPointSelection();
+        });
+
+        function startPointSelection() {
+            isSettingPoint = true;
+            document.querySelector('.crosshair').style.display = 'block';
+            document.querySelector('.status-info').textContent = `Click on reference point ${currentPoint + 1} on the PDF`;
+            
+            // Update crosshair position on mouse move
+            const pdfContainer = document.querySelector('.pdf-container');
+            pdfContainer.addEventListener('mousemove', updateCrosshair);
+            pdfContainer.addEventListener('click', selectPoint);
+        }
+
+        function updateCrosshair(e) {
+            if (!isSettingPoint) return;
+            
+            const rect = e.currentTarget.getBoundingClientRect();
+            const crosshair = document.querySelector('.crosshair');
+            crosshair.style.left = (e.clientX - rect.left) + 'px';
+            crosshair.style.top = (e.clientY - rect.top) + 'px';
+        }
+
+        function selectPoint(e) {
+            if (!isSettingPoint) return;
+            
+            const pdfContainer = document.querySelector('.pdf-container');
+            const pdfImage = document.querySelector('.pdf-image');
+            
+            // Get the exact click position
+            const containerRect = pdfContainer.getBoundingClientRect();
+            const imageRect = pdfImage.getBoundingClientRect();
+            
+            // Click position relative to container (for marker placement)
+            const containerClickX = e.clientX - containerRect.left;
+            const containerClickY = e.clientY - containerRect.top;
+            
+            // Click position relative to image (for coordinate calculation)
+            const imageClickX = e.clientX - imageRect.left;
+            const imageClickY = e.clientY - imageRect.top;
+            
+            // Ensure click is within image bounds
+            if (imageClickX < 0 || imageClickY < 0 || 
+                imageClickX > imageRect.width || imageClickY > imageRect.height) {
+                console.warn('Click outside image bounds');
+                return;
+            }
+            
+            // Convert to normalized coordinates (0-1) based on image
+            const x = imageClickX / imageRect.width;
+            const y = imageClickY / imageRect.height;
+            
+            // Add visual marker at exact click position
+            const marker = document.createElement('div');
+            marker.className = 'reference-point';
+            marker.style.left = containerClickX + 'px';
+            marker.style.top = containerClickY + 'px';
+            
+            const label = document.createElement('div');
+            label.className = 'reference-label';
+            label.textContent = `Point ${currentPoint + 1}`;
+            marker.appendChild(label);
+            
+            pdfContainer.appendChild(marker);
+            
+            // Debug log
+            console.log(`Point ${currentPoint + 1} clicked at:`, {
+                containerPos: { x: containerClickX, y: containerClickY },
+                imagePos: { x: imageClickX, y: imageClickY },
+                normalized: { x, y }
+            });
+            
+            // Show coordinate input dialog with normalized coordinates
+            showCoordinateDialog(x, y);
+            
+            isSettingPoint = false;
+            document.querySelector('.crosshair').style.display = 'none';
+        }
+
+        function showCoordinateDialog(pdfX, pdfY) {
+            document.querySelector('.overlay').style.display = 'block';
+            document.querySelector('.georef-dialog').style.display = 'block';
+            document.querySelector('.point-number').textContent = currentPoint + 1;
+            
+            // Clear previous inputs
+            document.querySelector('.coord-1').value = '';
+            document.querySelector('.coord-2').value = '';
+            
+            // Store current PDF coordinates
+            window.currentPdfPoint = { x: pdfX, y: pdfY };
+            
+            // Enable map clicking for coordinate selection
+            map.getCanvas().style.cursor = 'crosshair';
+            map.once('click', handleMapClick);
+        }
+        
+        // Store temporary marker reference
+        let tempMarker = null;
+        
+        // Handle map click to get coordinates
+        function handleMapClick(e) {
+            const coords = e.lngLat;
+            const coordSystem = document.getElementById('coordSystem').value;
+            
+            // Remove previous temporary marker if exists
+            if (tempMarker) {
+                tempMarker.remove();
+            }
+            
+            // Add temporary marker at clicked location
+            tempMarker = new maplibregl.Marker({ color: '#00ff00' })
+                .setLngLat([coords.lng, coords.lat])
+                .addTo(map);
+            
+            if (coordSystem === 'wgs84') {
+                // Fill in WGS84 coordinates
+                document.querySelector('.coord-1').value = coords.lng.toFixed(6);
+                document.querySelector('.coord-2').value = coords.lat.toFixed(6);
+            } else {
+                // For other coordinate systems, we'd need to transform
+                // For now, just use WGS84 and alert user
+                alert('Please select WGS84 to use map clicking. For other coordinate systems, enter manually.');
+                document.getElementById('coordSystem').value = 'wgs84';
+                document.querySelector('.coord-label-1').textContent = 'Longitude:';
+                document.querySelector('.coord-label-2').textContent = 'Latitude:';
+                document.querySelector('.coord-1').value = coords.lng.toFixed(6);
+                document.querySelector('.coord-2').value = coords.lat.toFixed(6);
+            }
+            
+            // Reset cursor
+            map.getCanvas().style.cursor = '';
+        }
+
+        // Handle coordinate system change
+        document.getElementById('coordSystem').addEventListener('change', (e) => {
+            const isWGS84 = e.target.value === 'wgs84';
+            document.querySelector('.coord-label-1').textContent = isWGS84 ? 'Longitude:' : 'Easting (X):';
+            document.querySelector('.coord-label-2').textContent = isWGS84 ? 'Latitude:' : 'Northing (Y):';
+        });
+
+        // Handle dialog buttons
+        document.querySelector('.confirm-btn').addEventListener('click', () => {
+            const coord1 = parseFloat(document.querySelector('.coord-1').value);
+            const coord2 = parseFloat(document.querySelector('.coord-2').value);
+            
+            if (isNaN(coord1) || isNaN(coord2)) {
+                alert('Please enter valid coordinates');
+                return;
+            }
+            
+            // Store reference point
+            referencePoints.push({
+                pdf: window.currentPdfPoint,
+                world: { x: coord1, y: coord2 },
+                coordSystem: document.getElementById('coordSystem').value
+            });
+            
+            // Remove temporary marker
+            if (tempMarker) {
+                tempMarker.remove();
+                tempMarker = null;
+            }
+            
+            // Close dialog
+            document.querySelector('.overlay').style.display = 'none';
+            document.querySelector('.georef-dialog').style.display = 'none';
+            
+            currentPoint++;
+            
+            if (currentPoint < 2) {
+                // Get second point
+                startPointSelection();
+            } else {
+                // Calculate transformation and display on map
+                calculateAndDisplayOverlay();
+            }
+        });
+
+        document.querySelector('.cancel-btn').addEventListener('click', () => {
+            document.querySelector('.overlay').style.display = 'none';
+            document.querySelector('.georef-dialog').style.display = 'none';
+            isSettingPoint = false;
+            document.querySelector('.crosshair').style.display = 'none';
+            
+            // Remove temporary marker
+            if (tempMarker) {
+                tempMarker.remove();
+                tempMarker = null;
+            }
+            
+            // Remove map click handler and reset cursor
+            map.off('click', handleMapClick);
+            map.getCanvas().style.cursor = '';
+        });
+
+        // Convert WGS84 to Web Mercator projection
+        function lonLatToMercator(lon, lat) {
+            const x = lon * 20037508.34 / 180;
+            const y = Math.log(Math.tan((90 + lat) * Math.PI / 360)) / (Math.PI / 180);
+            const mercatorY = y * 20037508.34 / 180;
+            return { x, y: mercatorY };
+        }
+        
+        // Convert Web Mercator back to WGS84
+        function mercatorToLonLat(x, y) {
+            const lon = (x / 20037508.34) * 180;
+            const lat = (Math.atan(Math.exp((y / 20037508.34) * Math.PI)) * 360 / Math.PI) - 90;
+            return [lon, lat];
+        }
+        
+        function calculateAndDisplayOverlay() {
+            const p1 = referencePoints[0];
+            const p2 = referencePoints[1];
+            
+            // Get PDF image dimensions
+            const pdfImage = document.querySelector('.pdf-image');
+            const pdfWidth = pdfImage.naturalWidth || pdfImage.width;
+            const pdfHeight = pdfImage.naturalHeight || pdfImage.height;
+            
+            // Convert PDF coordinates from normalized (0-1) to pixel coordinates
+            const pdf1 = {
+                x: p1.pdf.x * pdfWidth,
+                y: p1.pdf.y * pdfHeight
+            };
+            const pdf2 = {
+                x: p2.pdf.x * pdfWidth,
+                y: p2.pdf.y * pdfHeight
+            };
+            
+            // Convert world coordinates to Web Mercator (meters)
+            const world1_merc = lonLatToMercator(p1.world.x, p1.world.y);
+            const world2_merc = lonLatToMercator(p2.world.x, p2.world.y);
+            
+            // CRITICAL: PDF uses Y-down coordinate system, Mercator uses Y-up
+            // We need to flip Y coordinates for PDF
+            const pdf1_flipped = {
+                x: pdf1.x,
+                y: pdfHeight - pdf1.y  // Flip Y
+            };
+            const pdf2_flipped = {
+                x: pdf2.x,
+                y: pdfHeight - pdf2.y  // Flip Y
+            };
+            
+            // Vector from P1 to P2 in flipped PDF space (now Y-up like Mercator)
+            const pdfDx = pdf2_flipped.x - pdf1_flipped.x;
+            const pdfDy = pdf2_flipped.y - pdf1_flipped.y;
+            
+            // Vector from P1 to P2 in Mercator space (meters)
+            const mercDx = world2_merc.x - world1_merc.x;
+            const mercDy = world2_merc.y - world1_merc.y;
+            
+            // Calculate scale (meters per pixel)
+            const pdfDistance = Math.sqrt(pdfDx * pdfDx + pdfDy * pdfDy);
+            const mercDistance = Math.sqrt(mercDx * mercDx + mercDy * mercDy);
+            const scale = mercDistance / pdfDistance;
+            
+            // Calculate rotation (both coordinate systems now use Y-up)
+            const pdfAngle = Math.atan2(pdfDy, pdfDx);
+            const mercAngle = Math.atan2(mercDy, mercDx);
+            const rotation = mercAngle - pdfAngle;
+            
+            console.log('Transformation Debug:');
+            console.log('PDF dimensions:', pdfWidth, 'x', pdfHeight);
+            console.log('World coords (WGS84):', p1.world, p2.world);
+            console.log('World coords (Mercator):', world1_merc, world2_merc);
+            console.log('PDF vector (pixels):', pdfDx, pdfDy, 'distance:', pdfDistance);
+            console.log('Mercator vector (meters):', mercDx, mercDy, 'distance:', mercDistance);
+            console.log('Scale:', scale, 'meters/pixel');
+            console.log('Rotation:', rotation * 180 / Math.PI, 'degrees');
+            
+            // Helper function to transform a point
+            function transformPoint(pdfX, pdfY) {
+                // First, flip the Y coordinate to convert from Y-down to Y-up
+                const flippedY = pdfHeight - pdfY;
+                
+                // Translate to origin (relative to first reference point)
+                const tx = pdfX - pdf1_flipped.x;
+                const ty = flippedY - pdf1_flipped.y;
+                
+                // Apply rotation
+                const cosR = Math.cos(rotation);
+                const sinR = Math.sin(rotation);
+                const rx = tx * cosR - ty * sinR;
+                const ry = tx * sinR + ty * cosR;
+                
+                // Apply scale (convert to meters)
+                const sx = rx * scale;
+                const sy = ry * scale;
+                
+                // Translate to Mercator coordinates
+                const mercX = world1_merc.x + sx;
+                const mercY = world1_merc.y + sy;
+                
+                // Convert back to WGS84
+                return mercatorToLonLat(mercX, mercY);
+            }
+            
+            // Verify the transformation works for our reference points
+            const testP2 = transformPoint(pdf2.x, pdf2.y);
+            console.log('Point 2 transformed:', testP2, 'Expected:', [p2.world.x, p2.world.y]);
+            console.log('Error:', Math.abs(testP2[0] - p2.world.x), Math.abs(testP2[1] - p2.world.y));
+            
+            // Transform the four corners of the PDF
+            // Note: MapLibre expects coordinates in a specific order for image overlays
+            // The order should match the visual corners of the image
+            const tl = transformPoint(0, 0);                 // Top-left of PDF
+            const tr = transformPoint(pdfWidth, 0);         // Top-right of PDF
+            const br = transformPoint(pdfWidth, pdfHeight); // Bottom-right of PDF
+            const bl = transformPoint(0, pdfHeight);        // Bottom-left of PDF
+            
+            // MapLibre image source expects coordinates in this order:
+            // top-left, top-right, bottom-right, bottom-left
+            pdfBounds = [tl, tr, br, bl];
+            
+            console.log('PDF corner mapping:');
+            console.log('PDF (0,0) -> Map', tl);
+            console.log('PDF (width,0) -> Map', tr);
+            console.log('PDF (width,height) -> Map', br);
+            console.log('PDF (0,height) -> Map', bl);
+            
+            // Additional debug - check if bounds make sense
+            console.log('Corner coordinates:');
+            console.log('Top-left:', tl);
+            console.log('Top-right:', tr);
+            console.log('Bottom-right:', br);
+            console.log('Bottom-left:', bl);
+            
+            const width = Math.abs(tr[0] - tl[0]);
+            const height = Math.abs(tl[1] - bl[1]);
+            console.log('Overlay dimensions (degrees):', width, 'x', height);
+            console.log('Overlay dimensions (meters):', width * 111320 * Math.cos(p1.world.y * Math.PI / 180), 'x', height * 111320);
+            
+            // Debug logging
+            console.log('Reference points:', referencePoints);
+            console.log('PDF dimensions:', pdfWidth, 'x', pdfHeight);
+            console.log('PDF points (pixels):', pdf1, pdf2);
+            console.log('World points:', p1.world, p2.world);
+            console.log('Rotation:', rotation * 180 / Math.PI, 'degrees');
+            console.log('Scale:', scale);
+            console.log('Transformed bounds:', pdfBounds);
+            
+            // Add to map
+            addPdfOverlay();
+            
+            // Update status
+            document.querySelector('.status-info').textContent = 'Georeferencing complete';
+            document.querySelector('.opacity-control').style.display = 'block';
+            
+            // Calculate bounds for fitBounds
+            const lngs = pdfBounds.map(coord => coord[0]);
+            const lats = pdfBounds.map(coord => coord[1]);
+            const bounds = [
+                [Math.min(...lngs), Math.min(...lats)],
+                [Math.max(...lngs), Math.max(...lats)]
+            ];
+            
+            // Fit map to bounds
+            map.fitBounds(bounds, { padding: 50 });
+        }
+
+        function addPdfOverlay() {
+            // Remove existing overlay if any
+            if (map.getSource('pdf-overlay')) {
+                map.removeLayer('pdf-overlay-layer');
+                map.removeSource('pdf-overlay');
+            }
+
+            console.log('Adding overlay with bounds:', pdfBounds);
+            console.log('Image URL length:', pdfImageUrl ? pdfImageUrl.length : 0);
+
+            // Add new source and layer
+            map.addSource('pdf-overlay', {
+                type: 'image',
+                url: pdfImageUrl,
+                coordinates: pdfBounds
+            });
+
+            map.addLayer({
+                id: 'pdf-overlay-layer',
+                type: 'raster',
+                source: 'pdf-overlay',
+                paint: {
+                    'raster-opacity': 0.7
+                }
+            });
+            
+            // Debug: check if layer was added
+            console.log('Layer added:', map.getLayer('pdf-overlay-layer'));
+            
+            // Optional: Add markers at reference points for debugging
+            // Commented out to reduce clutter - uncomment if needed for debugging
+            /*
+            referencePoints.forEach((point, index) => {
+                new maplibregl.Marker({ color: '#ff0000' })
+                    .setLngLat([point.world.x, point.world.y])
+                    .setPopup(new maplibregl.Popup().setHTML(`Reference Point ${index + 1}`))
+                    .addTo(map);
+            });
+            */
+        }
+
+        // Handle opacity slider
+        document.querySelector('.opacity-slider').addEventListener('input', (e) => {
+            const opacity = e.target.value;
+            document.querySelector('.opacity-value').textContent = `${opacity}%`;
+            
+            if (map.getSource('pdf-overlay')) {
+                map.setPaintProperty('pdf-overlay-layer', 'raster-opacity', parseFloat(opacity) / 100);
+            }
+        });
+
+        // Selection mode state
+        let selectionModeState = {
+            active: false,
+            mode: 'remove', // 'remove' or 'keep'
+            canvas: null,
+            ctx: null,
+            originalImage: null,
+            selections: [],
+            isSelecting: false,
+            startX: 0,
+            startY: 0,
+            currentSelection: null
+        };
+
+        // Enter selection mode
+        function enterSelectionMode() {
+            if (!originalPdfUrl) {
+                alert('Please upload a PDF first');
+                return;
+            }
+
+            selectionModeState.active = true;
+            selectionModeState.selections = [];
+
+            // Store original image (use the unprocessed PDF)
+            const img = new Image();
+            img.onload = () => {
+                selectionModeState.originalImage = img;
+
+                // Create canvas overlay
+                const canvas = document.createElement('canvas');
+                const pdfImage = document.querySelector('.pdf-image');
+                const pdfContainer = document.querySelector('.pdf-container');
+                
+                // Set canvas size to match image
+                canvas.width = pdfImage.naturalWidth || pdfImage.width;
+                canvas.height = pdfImage.naturalHeight || pdfImage.height;
+                
+                // Position canvas over image
+                canvas.style.position = 'absolute';
+                canvas.style.top = '0';
+                canvas.style.left = '0';
+                canvas.style.width = pdfImage.width + 'px';
+                canvas.style.height = pdfImage.height + 'px';
+                canvas.style.cursor = 'crosshair';
+                canvas.style.zIndex = '10';
+                
+                pdfContainer.appendChild(canvas);
+                
+                selectionModeState.canvas = canvas;
+                selectionModeState.ctx = canvas.getContext('2d');
+
+                // Show selection UI
+                document.querySelector('.selection-toolbar').style.display = 'block';
+                document.querySelector('.selection-instructions').style.display = 'block';
+                
+                // Hide other controls
+                document.querySelector('.start-georef-btn').style.display = 'none';
+                document.querySelector('.process-btn').style.display = 'none';
+                
+                // Update status
+                document.querySelector('.status-info').textContent = 'Selection mode: Draw rectangles to select areas';
+
+                // Attach event listeners
+                canvas.addEventListener('mousedown', startSelection);
+                canvas.addEventListener('mousemove', updateSelection);
+                canvas.addEventListener('mouseup', endSelection);
+                
+                // Draw initial state
+                redrawCanvas();
+            };
+            img.src = originalPdfUrl;
+        }
+
+        // Exit selection mode
+        function exitSelectionMode(apply = false) {
+            if (!selectionModeState.active) return;
+
+            if (apply && selectionModeState.selections.length > 0) {
+                // Apply selections to create new image
+                applySelections();
+            }
+
+            // Clean up
+            if (selectionModeState.canvas) {
+                selectionModeState.canvas.removeEventListener('mousedown', startSelection);
+                selectionModeState.canvas.removeEventListener('mousemove', updateSelection);
+                selectionModeState.canvas.removeEventListener('mouseup', endSelection);
+                selectionModeState.canvas.remove();
+            }
+
+            // Hide selection UI
+            document.querySelector('.selection-toolbar').style.display = 'none';
+            document.querySelector('.selection-instructions').style.display = 'none';
+            
+            // Show original controls
+            document.querySelector('.process-btn').style.display = 'inline-block';
+            if (isProcessed) {
+                document.querySelector('.start-georef-btn').style.display = 'inline-block';
+            }
+
+            // Reset state
+            selectionModeState = {
+                active: false,
+                mode: 'remove',
+                canvas: null,
+                ctx: null,
+                originalImage: null,
+                selections: [],
+                isSelecting: false,
+                startX: 0,
+                startY: 0,
+                currentSelection: null
+            };
+
+            // Update status
+            document.querySelector('.status-info').textContent = isProcessed ? 
+                'Background removed - Ready for georeferencing' : 
+                'PDF loaded - Click "Remove Legend/Frame" to prepare for georeferencing';
+        }
+
+        // Selection event handlers
+        function startSelection(e) {
+            const rect = e.target.getBoundingClientRect();
+            const scaleX = e.target.width / rect.width;
+            const scaleY = e.target.height / rect.height;
+            
+            selectionModeState.isSelecting = true;
+            selectionModeState.startX = (e.clientX - rect.left) * scaleX;
+            selectionModeState.startY = (e.clientY - rect.top) * scaleY;
+            selectionModeState.currentSelection = {
+                x: selectionModeState.startX,
+                y: selectionModeState.startY,
+                width: 0,
+                height: 0
+            };
+        }
+
+        function updateSelection(e) {
+            if (!selectionModeState.isSelecting) return;
+            
+            const rect = e.target.getBoundingClientRect();
+            const scaleX = e.target.width / rect.width;
+            const scaleY = e.target.height / rect.height;
+            
+            const currentX = (e.clientX - rect.left) * scaleX;
+            const currentY = (e.clientY - rect.top) * scaleY;
+            
+            selectionModeState.currentSelection = {
+                x: Math.min(selectionModeState.startX, currentX),
+                y: Math.min(selectionModeState.startY, currentY),
+                width: Math.abs(currentX - selectionModeState.startX),
+                height: Math.abs(currentY - selectionModeState.startY)
+            };
+            
+            redrawCanvas();
+        }
+
+        function endSelection(e) {
+            if (!selectionModeState.isSelecting) return;
+            
+            selectionModeState.isSelecting = false;
+            
+            // Only add selection if it has meaningful size
+            if (selectionModeState.currentSelection.width > 5 && 
+                selectionModeState.currentSelection.height > 5) {
+                selectionModeState.selections.push({...selectionModeState.currentSelection});
+            }
+            
+            selectionModeState.currentSelection = null;
+            redrawCanvas();
+        }
+
+        // Redraw canvas with selections
+        function redrawCanvas() {
+            const ctx = selectionModeState.ctx;
+            const canvas = selectionModeState.canvas;
+            
+            // Clear canvas
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            
+            // Draw existing selections
+            ctx.fillStyle = 'rgba(255, 0, 0, 0.2)';
+            ctx.strokeStyle = 'rgba(255, 0, 0, 0.8)';
+            ctx.lineWidth = 2;
+            
+            selectionModeState.selections.forEach(sel => {
+                ctx.fillRect(sel.x, sel.y, sel.width, sel.height);
+                ctx.strokeRect(sel.x, sel.y, sel.width, sel.height);
+            });
+            
+            // Draw current selection
+            if (selectionModeState.currentSelection) {
+                ctx.fillStyle = 'rgba(0, 0, 255, 0.2)';
+                ctx.strokeStyle = 'rgba(0, 0, 255, 0.8)';
+                const sel = selectionModeState.currentSelection;
+                ctx.fillRect(sel.x, sel.y, sel.width, sel.height);
+                ctx.strokeRect(sel.x, sel.y, sel.width, sel.height);
+            }
+        }
+
+        // Apply selections to create new image
+        function applySelections() {
+            const canvas = document.createElement('canvas');
+            const ctx = canvas.getContext('2d');
+            const img = selectionModeState.originalImage;
+            
+            canvas.width = img.width;
+            canvas.height = img.height;
+            
+            // Draw original image
+            ctx.drawImage(img, 0, 0);
+            
+            // Get image data
+            const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+            const data = imageData.data;
+            
+            if (selectionModeState.mode === 'remove') {
+                // Make selected areas transparent
+                selectionModeState.selections.forEach(sel => {
+                    for (let y = sel.y; y < sel.y + sel.height; y++) {
+                        for (let x = sel.x; x < sel.x + sel.width; x++) {
+                            const i = (y * canvas.width + x) * 4;
+                            data[i + 3] = 0; // Set alpha to 0
+                        }
+                    }
+                });
+            } else {
+                // Keep only selected areas (make everything else transparent)
+                for (let y = 0; y < canvas.height; y++) {
+                    for (let x = 0; x < canvas.width; x++) {
+                        let inSelection = false;
+                        for (const sel of selectionModeState.selections) {
+                            if (x >= sel.x && x < sel.x + sel.width &&
+                                y >= sel.y && y < sel.y + sel.height) {
+                                inSelection = true;
+                                break;
+                            }
+                        }
+                        if (!inSelection) {
+                            const i = (y * canvas.width + x) * 4;
+                            data[i + 3] = 0; // Set alpha to 0
+                        }
+                    }
+                }
+            }
+            
+            // Put modified data back
+            ctx.putImageData(imageData, 0, 0);
+            
+            // Update the displayed image
+            pdfImageUrl = canvas.toDataURL('image/png');
+            document.querySelector('.pdf-image').src = pdfImageUrl;
+            
+            isProcessed = true;
+            document.querySelector('.process-btn').textContent = 'Show Original';
+        }
+
+        // Update button click handlers
+        document.querySelector('.process-btn').addEventListener('click', async () => {
+            if (isProcessed) {
+                // Toggle between processed and original
+                const pdfImage = document.querySelector('.pdf-image');
+                if (pdfImage.src === originalPdfUrl) {
+                    pdfImage.src = pdfImageUrl;
+                    document.querySelector('.process-btn').textContent = 'Show Original';
+                } else {
+                    pdfImage.src = originalPdfUrl;
+                    document.querySelector('.process-btn').textContent = 'Remove Legend/Frame';
+                }
+            } else {
+                // Enter selection mode instead of automatic processing
+                enterSelectionMode();
+            }
+        });
+
+        // Selection toolbar button handlers
+        document.querySelector('.mode-btn.remove-mode').addEventListener('click', function() {
+            selectionModeState.mode = 'remove';
+            this.classList.add('active');
+            document.querySelector('.mode-btn.keep-mode').classList.remove('active');
+            document.querySelector('.mode-text').textContent = 'remove';
+        });
+
+        document.querySelector('.mode-btn.keep-mode').addEventListener('click', function() {
+            selectionModeState.mode = 'keep';
+            this.classList.add('active');
+            document.querySelector('.mode-btn.remove-mode').classList.remove('active');
+            document.querySelector('.mode-text').textContent = 'keep';
+        });
+
+        document.querySelector('.action-btn.undo-btn').addEventListener('click', () => {
+            if (selectionModeState.selections.length > 0) {
+                selectionModeState.selections.pop();
+                redrawCanvas();
+            }
+        });
+
+        document.querySelector('.action-btn.clear-btn').addEventListener('click', () => {
+            selectionModeState.selections = [];
+            redrawCanvas();
+        });
+
+        document.querySelector('.action-btn.apply-btn').addEventListener('click', () => {
+            if (selectionModeState.selections.length === 0) {
+                alert('Please make at least one selection');
+                return;
+            }
+            exitSelectionMode(true);
+        });
+
+        document.querySelector('.action-btn.preview-btn').addEventListener('click', () => {
+            // Show preview of what will be applied
+            showSelectionPreview();
+        });
+
+        // Preview functionality
+        function showSelectionPreview() {
+            const previewCanvas = document.createElement('canvas');
+            const ctx = previewCanvas.getContext('2d');
+            const img = selectionModeState.originalImage;
+            
+            previewCanvas.width = img.width;
+            previewCanvas.height = img.height;
+            
+            // Draw original image
+            ctx.drawImage(img, 0, 0);
+            
+            // Apply preview of selections
+            const imageData = ctx.getImageData(0, 0, previewCanvas.width, previewCanvas.height);
+            const data = imageData.data;
+            
+            if (selectionModeState.mode === 'remove') {
+                selectionModeState.selections.forEach(sel => {
+                    for (let y = sel.y; y < sel.y + sel.height; y++) {
+                        for (let x = sel.x; x < sel.x + sel.width; x++) {
+                            const i = (y * previewCanvas.width + x) * 4;
+                            data[i + 3] = 0;
+                        }
+                    }
+                });
+            } else {
+                for (let y = 0; y < previewCanvas.height; y++) {
+                    for (let x = 0; x < previewCanvas.width; x++) {
+                        let inSelection = false;
+                        for (const sel of selectionModeState.selections) {
+                            if (x >= sel.x && x < sel.x + sel.width &&
+                                y >= sel.y && y < sel.y + sel.height) {
+                                inSelection = true;
+                                break;
+                            }
+                        }
+                        if (!inSelection) {
+                            const i = (y * previewCanvas.width + x) * 4;
+                            data[i + 3] = 0;
+                        }
+                    }
+                }
+            }
+            
+            ctx.putImageData(imageData, 0, 0);
+            
+            // Show preview overlay
+            const previewOverlay = document.querySelector('.preview-overlay');
+            const previewCanvasElement = document.querySelector('.preview-canvas');
+            
+            // Scale preview to fit
+            const maxWidth = window.innerWidth * 0.8;
+            const maxHeight = window.innerHeight * 0.8;
+            const scale = Math.min(maxWidth / previewCanvas.width, maxHeight / previewCanvas.height, 1);
+            
+            previewCanvasElement.width = previewCanvas.width * scale;
+            previewCanvasElement.height = previewCanvas.height * scale;
+            
+            const previewCtx = previewCanvasElement.getContext('2d');
+            previewCtx.drawImage(previewCanvas, 0, 0, previewCanvasElement.width, previewCanvasElement.height);
+            
+            previewOverlay.style.display = 'flex';
+        }
+
+        // Preview overlay handlers
+        document.querySelector('.close-preview-btn').addEventListener('click', () => {
+            document.querySelector('.preview-overlay').style.display = 'none';
+        });
+
+        document.querySelector('.confirm-preview-btn').addEventListener('click', () => {
+            document.querySelector('.preview-overlay').style.display = 'none';
+            exitSelectionMode(true);
+        });
+    </script>
+</body>
+</html>
