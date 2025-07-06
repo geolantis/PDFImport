@@ -1591,6 +1591,8 @@
             setTimeout(() => {
                 const mapContainer = document.getElementById('map');
                 if (mapContainer && !map) {
+                    console.log('Initializing reference map with cadastral layers');
+                    
                     map = new maplibregl.Map({
                         container: mapContainer,
                         style: 'https://gis.ktn.gv.at/osgdi/styles/basemap_ktn_vektor.json',
@@ -1599,6 +1601,67 @@
                     });
                     
                     map.addControl(new maplibregl.NavigationControl());
+                    
+                    // Add cadastral layers immediately on load
+                    map.on('load', () => {
+                        console.log('Reference map loaded, adding cadastral layers');
+                        
+                        try {
+                            map.addSource('gst_bev-source', {
+                                'type': 'vector',
+                                'url': 'https://gis.ktn.gv.at/osgdi/tilesets/gst_bev.json'
+                            });
+                            
+                            map.addLayer({
+                                'id': 'cadastral-parcels',
+                                'type': 'line',
+                                'source': 'gst_bev-source',
+                                'source-layer': 'gst_bev',
+                                'minzoom': 13,
+                                'maxzoom': 24,
+                                'paint': {
+                                    'line-color': '#000000',
+                                    'line-width': {
+                                        'stops': [[13, 0.6], [15, 0.8]]
+                                    }
+                                }
+                            });
+                            
+                            map.addLayer({
+                                'id': 'cadastral-labels',
+                                'type': 'symbol',
+                                'source': 'gst_bev-source',
+                                'source-layer': 'gst_bev',
+                                'minzoom': 16,
+                                'maxzoom': 24,
+                                'layout': {
+                                    'text-field': '{knr}',
+                                    'text-font': ['Open Sans Regular'],
+                                    'text-size': {
+                                        'stops': [[16, 10], [19, 14]]
+                                    }
+                                },
+                                'paint': {
+                                    'text-color': '#333333'
+                                }
+                            });
+                            
+                            console.log('Cadastral layers successfully added to reference map');
+                        } catch (error) {
+                            console.error('Error adding cadastral layers to reference map:', error);
+                        }
+                    });
+                    
+                    // Debug map errors
+                    map.on('error', (e) => {
+                        console.error('Reference map error:', e);
+                        if (e.sourceId) {
+                            console.error('Source ID:', e.sourceId);
+                        }
+                        if (e.error) {
+                            console.error('Error details:', e.error);
+                        }
+                    });
                 }
             }, 100);
         }
