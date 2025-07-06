@@ -2062,19 +2062,289 @@
         
         // Export functions
         function exportGeoTIFF() {
-            alert('Exporting as GeoTIFF...');
+            if (referencePoints.length < 2) {
+                alert('Please complete georeferencing first');
+                return;
+            }
+            
+            // Since we can't create actual GeoTIFF in browser, we'll download the image with metadata
+            const canvas = document.createElement('canvas');
+            const ctx = canvas.getContext('2d');
+            const img = new Image();
+            
+            img.onload = () => {
+                canvas.width = img.width;
+                canvas.height = img.height;
+                ctx.drawImage(img, 0, 0);
+                
+                // Convert to blob and download
+                canvas.toBlob((blob) => {
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = 'georeferenced_plan.png';
+                    document.body.appendChild(a);
+                    a.click();
+                    document.body.removeChild(a);
+                    URL.revokeObjectURL(url);
+                    
+                    // Also download metadata file
+                    downloadMetadata('tiff');
+                }, 'image/png');
+            };
+            
+            img.src = pdfData.processedUrl;
         }
         
         function exportKML() {
-            alert('Exporting as KML...');
+            if (referencePoints.length < 2) {
+                alert('Please complete georeferencing first');
+                return;
+            }
+            
+            // Calculate bounds for KML
+            const bounds = calculateImageBounds();
+            if (!bounds) return;
+            
+            const kmlContent = generateKML(bounds);
+            downloadFile(kmlContent, 'georeferenced_plan.kml', 'application/vnd.google-earth.kml+xml');
         }
         
         function exportWorldFile() {
-            alert('Exporting World File...');
+            if (referencePoints.length < 2) {
+                alert('Please complete georeferencing first');
+                return;
+            }
+            
+            const worldFile = generateWorldFile();
+            if (worldFile) {
+                downloadFile(worldFile, 'georeferenced_plan.pgw', 'text/plain');
+                
+                // Also download the image
+                const canvas = document.createElement('canvas');
+                const ctx = canvas.getContext('2d');
+                const img = new Image();
+                
+                img.onload = () => {
+                    canvas.width = img.width;
+                    canvas.height = img.height;
+                    ctx.drawImage(img, 0, 0);
+                    
+                    canvas.toBlob((blob) => {
+                        const url = URL.createObjectURL(blob);
+                        const a = document.createElement('a');
+                        a.href = url;
+                        a.download = 'georeferenced_plan.png';
+                        document.body.appendChild(a);
+                        a.click();
+                        document.body.removeChild(a);
+                        URL.revokeObjectURL(url);
+                    }, 'image/png');
+                };
+                
+                img.src = pdfData.processedUrl;
+            }
+        }
+        
+        function calculateImageBounds() {
+            if (referencePoints.length < 2) return null;
+            
+            const p1 = referencePoints[0];
+            const p2 = referencePoints[1];
+            
+            // Get PDF dimensions
+            const pdfWidth = pdfData.width;
+            const pdfHeight = pdfData.height;
+            
+            // Convert PDF coordinates from normalized (0-1) to pixel coordinates
+            const pdf1 = {
+                x: p1.pdf.x * pdfWidth,
+                y: p1.pdf.y * pdfHeight
+            };
+            const pdf2 = {
+                x: p2.pdf.x * pdfWidth,
+                y: p2.pdf.y * pdfHeight
+            };
+            
+            // Convert world coordinates to Web Mercator (meters)
+            const world1_merc = lonLatToMercator(p1.world.x, p1.world.y);
+            const world2_merc = lonLatToMercator(p2.world.x, p2.world.y);
+            
+            // Calculate transformation parameters
+            const pdf1_flipped = {
+                x: pdf1.x,
+                y: pdfHeight - pdf1.y
+            };
+            const pdf2_flipped = {
+                x: pdf2.x,
+                y: pdfHeight - pdf2.y
+            };
+            
+            const pdfDx = pdf2_flipped.x - pdf1_flipped.x;
+            const pdfDy = pdf2_flipped.y - pdf1_flipped.y;
+            const mercDx = world2_merc.x - world1_merc.x;
+            const mercDy = world2_merc.y - world1_merc.y;
+            
+            const pdfDistance = Math.sqrt(pdfDx * pdfDx + pdfDy * pdfDy);
+            const mercDistance = Math.sqrt(mercDx * mercDx + mercDy * mercDy);
+            const scale = mercDistance / pdfDistance;
+            
+            const pdfAngle = Math.atan2(pdfDy, pdfDx);
+            const mercAngle = Math.atan2(mercDy, mercDx);
+            const rotation = mercAngle - pdfAngle;
+            
+            // Transform corners
+            function transformPoint(pdfX, pdfY) {
+                const flippedY = pdfHeight - pdfY;
+                const tx = pdfX - pdf1_flipped.x;
+                const ty = flippedY - pdf1_flipped.y;
+                
+                const cosR = Math.cos(rotation);
+                const sinR = Math.sin(rotation);
+                const rx = tx * cosR - ty * sinR;
+                const ry = tx * sinR + ty * cosR;
+                
+                const sx = rx * scale;
+                const sy = ry * scale;
+                
+                const mercX = world1_merc.x + sx;
+                const mercY = world1_merc.y + sy;
+                
+                return mercatorToLonLat(mercX, mercY);
+            }
+            
+            const tl = transformPoint(0, 0);
+            const tr = transformPoint(pdfWidth, 0);
+            const br = transformPoint(pdfWidth, pdfHeight);
+            const bl = transformPoint(0, pdfHeight);
+            
+            return { tl, tr, br, bl };
+        }
+        
+        function generateKML(bounds) {
+            const imageUrl = pdfData.processedUrl;
+            
+            return `<?xml version="1.0" encoding="UTF-8"?>
+<kml xmlns="http://www.opengis.net/kml/2.2">
+  <Document>
+    <name>Georeferenced PDF Plan</name>
+    <description>Exported from PDF Import Tool</description>
+    <GroundOverlay>
+      <name>PDF Plan Overlay</name>
+      <Icon>
+        <href>data:image/png;base64,${imageUrl.split(',')[1]}</href>
+      </Icon>
+      <gx:LatLonQuad>
+        <coordinates>
+          ${bounds.bl[0]},${bounds.bl[1]},0
+          ${bounds.br[0]},${bounds.br[1]},0
+          ${bounds.tr[0]},${bounds.tr[1]},0
+          ${bounds.tl[0]},${bounds.tl[1]},0
+        </coordinates>
+      </gx:LatLonQuad>
+    </GroundOverlay>
+  </Document>
+</kml>`;
+        }
+        
+        function generateWorldFile() {
+            if (referencePoints.length < 2) return null;
+            
+            const p1 = referencePoints[0];
+            const p2 = referencePoints[1];
+            
+            // Get PDF dimensions
+            const pdfWidth = pdfData.width;
+            const pdfHeight = pdfData.height;
+            
+            // Convert to pixel coordinates
+            const pdf1 = {
+                x: p1.pdf.x * pdfWidth,
+                y: p1.pdf.y * pdfHeight
+            };
+            const pdf2 = {
+                x: p2.pdf.x * pdfWidth,
+                y: p2.pdf.y * pdfHeight
+            };
+            
+            // Calculate transformation matrix
+            const dx = p2.world.x - p1.world.x;
+            const dy = p2.world.y - p1.world.y;
+            const dpx = pdf2.x - pdf1.x;
+            const dpy = pdf2.y - pdf1.y;
+            
+            // World file parameters
+            const scaleX = dx / dpx;
+            const scaleY = -dy / dpy; // Negative because image Y is flipped
+            const skewX = 0; // Assuming no skew for simplicity
+            const skewY = 0;
+            
+            // Calculate top-left world coordinates
+            const worldX = p1.world.x - (pdf1.x * scaleX);
+            const worldY = p1.world.y - (pdf1.y * scaleY);
+            
+            // World file format: scaleX, skewY, skewX, scaleY, worldX, worldY
+            return `${scaleX.toFixed(10)}
+${skewY.toFixed(10)}
+${skewX.toFixed(10)}
+${scaleY.toFixed(10)}
+${worldX.toFixed(10)}
+${worldY.toFixed(10)}`;
+        }
+        
+        function downloadMetadata(format) {
+            const metadata = {
+                format: format,
+                created: new Date().toISOString(),
+                referencePoints: referencePoints,
+                pdfDimensions: {
+                    width: pdfData.width,
+                    height: pdfData.height
+                },
+                coordinateSystem: 'WGS84'
+            };
+            
+            const content = JSON.stringify(metadata, null, 2);
+            downloadFile(content, `georeferencing_metadata.json`, 'application/json');
+        }
+        
+        function downloadFile(content, filename, mimeType) {
+            const blob = new Blob([content], { type: mimeType });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = filename;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
         }
         
         function completeProcess() {
-            alert('Georeferencing complete! Your files have been saved.');
+            if (referencePoints.length < 2) {
+                alert('Please complete georeferencing first');
+                return;
+            }
+            
+            const choice = confirm('Georeferencing complete! Would you like to export your results now?');
+            if (choice) {
+                // Show export options
+                const exportChoice = prompt('Choose export format:\\n1 - World File (.pgw + .png)\\n2 - KML for Google Earth\\n3 - PNG with metadata', '1');
+                
+                switch(exportChoice) {
+                    case '1':
+                        exportWorldFile();
+                        break;
+                    case '2':
+                        exportKML();
+                        break;
+                    case '3':
+                        exportGeoTIFF();
+                        break;
+                    default:
+                        exportWorldFile(); // Default to world file
+                }
+            }
         }
     </script>
 </body>
