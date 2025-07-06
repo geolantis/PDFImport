@@ -2106,8 +2106,40 @@
             const bounds = calculateImageBounds();
             if (!bounds) return;
             
-            const kmlContent = generateKML(bounds);
-            downloadFile(kmlContent, 'georeferenced_plan.kml', 'application/vnd.google-earth.kml+xml');
+            // First download the image separately
+            const canvas = document.createElement('canvas');
+            const ctx = canvas.getContext('2d');
+            const img = new Image();
+            
+            img.onload = () => {
+                canvas.width = img.width;
+                canvas.height = img.height;
+                ctx.drawImage(img, 0, 0);
+                
+                // Download image first
+                canvas.toBlob((blob) => {
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = 'georeferenced_plan.png';
+                    document.body.appendChild(a);
+                    a.click();
+                    document.body.removeChild(a);
+                    URL.revokeObjectURL(url);
+                    
+                    // Then generate KML pointing to local image
+                    const kmlContent = generateKML(bounds);
+                    downloadFile(kmlContent, 'georeferenced_plan.kml', 'application/vnd.google-earth.kml+xml');
+                    
+                    // Also create a simpler LatLonBox version for better compatibility
+                    const simpleKML = generateSimpleKML(bounds);
+                    downloadFile(simpleKML, 'georeferenced_plan_simple.kml', 'application/vnd.google-earth.kml+xml');
+                    
+                    alert('Downloaded KML and PNG files. Use georeferenced_plan_simple.kml if the main KML doesn\\'t work. Place all files in the same folder.');
+                }, 'image/png');
+            };
+            
+            img.src = pdfData.processedUrl;
         }
         
         function exportWorldFile() {
@@ -2222,26 +2254,57 @@
         }
         
         function generateKML(bounds) {
-            const imageUrl = pdfData.processedUrl;
-            
+            // Use relative path to image file instead of embedded data
             return `<?xml version="1.0" encoding="UTF-8"?>
-<kml xmlns="http://www.opengis.net/kml/2.2">
+<kml xmlns="http://www.opengis.net/kml/2.2" xmlns:gx="http://www.google.com/kml/ext/2.2">
   <Document>
     <name>Georeferenced PDF Plan</name>
     <description>Exported from PDF Import Tool</description>
     <GroundOverlay>
       <name>PDF Plan Overlay</name>
       <Icon>
-        <href>data:image/png;base64,${imageUrl.split(',')[1]}</href>
+        <href>georeferenced_plan.png</href>
       </Icon>
       <gx:LatLonQuad>
         <coordinates>
-          ${bounds.bl[0]},${bounds.bl[1]},0
-          ${bounds.br[0]},${bounds.br[1]},0
-          ${bounds.tr[0]},${bounds.tr[1]},0
-          ${bounds.tl[0]},${bounds.tl[1]},0
+          ${bounds.bl[0]},${bounds.bl[1]},0 ${bounds.br[0]},${bounds.br[1]},0 ${bounds.tr[0]},${bounds.tr[1]},0 ${bounds.tl[0]},${bounds.tl[1]},0
         </coordinates>
       </gx:LatLonQuad>
+    </GroundOverlay>
+  </Document>
+</kml>`;
+        }
+        
+        function generateSimpleKML(bounds) {
+            // Calculate bounding box for simpler LatLonBox approach
+            const lngs = [bounds.tl[0], bounds.tr[0], bounds.br[0], bounds.bl[0]];
+            const lats = [bounds.tl[1], bounds.tr[1], bounds.br[1], bounds.bl[1]];
+            
+            const north = Math.max(...lats);
+            const south = Math.min(...lats);
+            const east = Math.max(...lngs);
+            const west = Math.min(...lngs);
+            
+            // Calculate rotation (approximate)
+            const rotation = Math.atan2(bounds.tr[1] - bounds.tl[1], bounds.tr[0] - bounds.tl[0]) * 180 / Math.PI;
+            
+            return `<?xml version="1.0" encoding="UTF-8"?>
+<kml xmlns="http://www.opengis.net/kml/2.2">
+  <Document>
+    <name>Georeferenced PDF Plan (Simple)</name>
+    <description>Exported from PDF Import Tool - Simple bounding box version</description>
+    <GroundOverlay>
+      <name>PDF Plan Overlay</name>
+      <Icon>
+        <href>georeferenced_plan.png</href>
+      </Icon>
+      <LatLonBox>
+        <north>${north}</north>
+        <south>${south}</south>
+        <east>${east}</east>
+        <west>${west}</west>
+        <rotation>${rotation}</rotation>
+      </LatLonBox>
     </GroundOverlay>
   </Document>
 </kml>`;
