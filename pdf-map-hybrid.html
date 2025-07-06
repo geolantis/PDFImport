@@ -1,0 +1,1799 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PDF Import - Hybrid Interface</title>
+    <script src='https://unpkg.com/maplibre-gl@3.6.2/dist/maplibre-gl.js'></script>
+    <link href='https://unpkg.com/maplibre-gl@3.6.2/dist/maplibre-gl.css' rel='stylesheet' />
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            overflow: hidden;
+        }
+        
+        /* Minimal Progress Bar */
+        .progress-bar {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 60px;
+            background: white;
+            border-bottom: 1px solid #e0e0e0;
+            z-index: 100;
+            display: flex;
+            align-items: center;
+            padding: 0 24px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+        }
+        
+        .progress-steps {
+            display: flex;
+            flex: 1;
+            max-width: 800px;
+            margin: 0 auto;
+            align-items: center;
+        }
+        
+        .progress-step {
+            display: flex;
+            align-items: center;
+            flex: 1;
+            position: relative;
+        }
+        
+        .progress-step:not(:last-child)::after {
+            content: '';
+            position: absolute;
+            left: 48px;
+            right: 0;
+            height: 2px;
+            background: #e0e0e0;
+            top: 50%;
+            transform: translateY(-50%);
+        }
+        
+        .progress-step.completed:not(:last-child)::after {
+            background: #10b981;
+        }
+        
+        .progress-indicator {
+            width: 36px;
+            height: 36px;
+            border-radius: 50%;
+            background: #f3f4f6;
+            border: 2px solid #e0e0e0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 600;
+            font-size: 14px;
+            z-index: 1;
+            position: relative;
+            transition: all 0.3s ease;
+        }
+        
+        .progress-step.active .progress-indicator {
+            background: #3b82f6;
+            color: white;
+            border-color: #3b82f6;
+            box-shadow: 0 0 0 4px rgba(59, 130, 246, 0.1);
+        }
+        
+        .progress-step.completed .progress-indicator {
+            background: #10b981;
+            color: white;
+            border-color: #10b981;
+        }
+        
+        .progress-step.completed .progress-indicator::after {
+            content: '✓';
+            position: absolute;
+            font-size: 16px;
+        }
+        
+        .progress-step.completed .progress-indicator span {
+            display: none;
+        }
+        
+        .progress-label {
+            margin-left: 12px;
+            font-size: 14px;
+            color: #6b7280;
+            white-space: nowrap;
+        }
+        
+        .progress-step.active .progress-label,
+        .progress-step.completed .progress-label {
+            color: #1a1a1a;
+            font-weight: 500;
+        }
+        
+        /* Main Container */
+        .main-container {
+            position: fixed;
+            top: 60px;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: #f8f9fa;
+            overflow: hidden;
+        }
+        
+        /* Step Panels */
+        .step-panel {
+            width: 100%;
+            height: 100%;
+            display: none;
+        }
+        
+        .step-panel.active {
+            display: flex;
+        }
+        
+        /* Step 1: Upload */
+        .upload-panel {
+            align-items: center;
+            justify-content: center;
+            padding: 40px;
+        }
+        
+        .upload-container {
+            width: 100%;
+            max-width: 600px;
+            text-align: center;
+        }
+        
+        .upload-area {
+            padding: 80px 40px;
+            border: 3px dashed #d1d5db;
+            border-radius: 16px;
+            background: white;
+            transition: all 0.3s ease;
+            cursor: pointer;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.05);
+        }
+        
+        .upload-area:hover {
+            border-color: #3b82f6;
+            background: #f0f9ff;
+            transform: translateY(-2px);
+            box-shadow: 0 8px 16px rgba(0, 0, 0, 0.1);
+        }
+        
+        .upload-area.dragover {
+            border-color: #3b82f6;
+            background: #eff6ff;
+            transform: scale(1.02);
+        }
+        
+        .upload-icon {
+            width: 96px;
+            height: 96px;
+            margin: 0 auto 24px;
+            background: #eff6ff;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 48px;
+        }
+        
+        .upload-title {
+            font-size: 24px;
+            font-weight: 600;
+            color: #1a1a1a;
+            margin-bottom: 12px;
+        }
+        
+        .upload-subtitle {
+            font-size: 16px;
+            color: #6b7280;
+            margin-bottom: 8px;
+        }
+        
+        .upload-formats {
+            font-size: 14px;
+            color: #9ca3af;
+        }
+        
+        .file-input {
+            display: none;
+        }
+        
+        /* Step 2: Background Removal */
+        .removal-panel {
+            padding: 20px;
+            gap: 20px;
+        }
+        
+        .pdf-preview-panel {
+            flex: 1;
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            position: relative;
+        }
+        
+        .pdf-viewer {
+            flex: 1;
+            position: relative;
+            overflow: auto;
+            background: #f8f9fa;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+        
+        .pdf-container {
+            position: relative;
+            display: inline-block;
+            max-width: 100%;
+            max-height: 100%;
+        }
+        
+        .pdf-image {
+            max-width: 100%;
+            max-height: 100%;
+            display: block;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+        }
+        
+        .selection-canvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            cursor: crosshair;
+            z-index: 10;
+        }
+        
+        .removal-tools {
+            width: 320px;
+            background: white;
+            border-radius: 12px;
+            padding: 24px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+        }
+        
+        .zoom-controls {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            display: flex;
+            gap: 8px;
+            z-index: 10;
+        }
+        
+        .zoom-button {
+            width: 44px;
+            height: 44px;
+            border-radius: 8px;
+            background: white;
+            border: 1px solid #e0e0e0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 20px;
+            cursor: pointer;
+            transition: all 0.2s;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        }
+        
+        .zoom-button:hover {
+            background: #f3f4f6;
+            transform: translateY(-1px);
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.15);
+        }
+        
+        .mode-selector {
+            background: #f3f4f6;
+            padding: 4px;
+            border-radius: 8px;
+            display: flex;
+        }
+        
+        .mode-button {
+            flex: 1;
+            padding: 10px;
+            border: none;
+            background: transparent;
+            border-radius: 6px;
+            font-size: 14px;
+            font-weight: 500;
+            color: #6b7280;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        
+        .mode-button.active {
+            background: white;
+            color: #1a1a1a;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+        }
+        
+        .selection-info {
+            background: #f8f9fa;
+            padding: 16px;
+            border-radius: 8px;
+            text-align: center;
+        }
+        
+        .selection-count {
+            font-size: 24px;
+            font-weight: 600;
+            color: #1a1a1a;
+            margin-bottom: 4px;
+        }
+        
+        .selection-label {
+            font-size: 14px;
+            color: #6b7280;
+        }
+        
+        .tool-buttons {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+        
+        .tool-button {
+            padding: 12px 20px;
+            border: none;
+            border-radius: 8px;
+            font-size: 14px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        
+        .tool-button.preview {
+            background: #e0e7ff;
+            color: #3730a3;
+        }
+        
+        .tool-button.preview:hover {
+            background: #c7d2fe;
+        }
+        
+        .tool-button.clear {
+            background: #fef3c7;
+            color: #92400e;
+        }
+        
+        .tool-button.clear:hover {
+            background: #fde68a;
+        }
+        
+        /* Step 3: Reference Points */
+        .reference-panel {
+            padding: 20px;
+            gap: 20px;
+        }
+        
+        .reference-split {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+            height: 100%;
+        }
+        
+        .reference-pane {
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+        
+        .reference-header {
+            padding: 20px;
+            border-bottom: 1px solid #e0e0e0;
+            font-size: 18px;
+            font-weight: 600;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        .reference-content {
+            flex: 1;
+            position: relative;
+            overflow: hidden;
+        }
+        
+        #map {
+            width: 100%;
+            height: 100%;
+        }
+        
+        .crosshair {
+            position: absolute;
+            width: 60px;
+            height: 60px;
+            pointer-events: none;
+            display: none;
+            transform: translate(-50%, -50%);
+            z-index: 100;
+        }
+        
+        .crosshair::before,
+        .crosshair::after {
+            content: '';
+            position: absolute;
+            background: #ef4444;
+            box-shadow: 0 0 0 1px white;
+        }
+        
+        .crosshair::before {
+            width: 2px;
+            height: 100%;
+            left: 50%;
+            transform: translateX(-50%);
+        }
+        
+        .crosshair::after {
+            width: 100%;
+            height: 2px;
+            top: 50%;
+            transform: translateY(-50%);
+        }
+        
+        .reference-point {
+            position: absolute;
+            width: 32px;
+            height: 32px;
+            background: #ef4444;
+            border: 3px solid white;
+            border-radius: 50%;
+            transform: translate(-50%, -50%);
+            box-shadow: 0 4px 8px rgba(0,0,0,0.3);
+            z-index: 10;
+        }
+        
+        .reference-label {
+            position: absolute;
+            top: -30px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: #ef4444;
+            color: white;
+            padding: 4px 12px;
+            border-radius: 4px;
+            font-size: 14px;
+            font-weight: 500;
+            white-space: nowrap;
+        }
+        
+        .point-status {
+            display: flex;
+            gap: 12px;
+            padding: 16px 20px;
+            background: #f8f9fa;
+            border-top: 1px solid #e0e0e0;
+        }
+        
+        .point-indicator {
+            flex: 1;
+            padding: 12px;
+            background: white;
+            border: 2px solid #e0e0e0;
+            border-radius: 8px;
+            text-align: center;
+            font-size: 14px;
+            font-weight: 500;
+            color: #6b7280;
+            transition: all 0.2s;
+        }
+        
+        .point-indicator.active {
+            border-color: #3b82f6;
+            background: #eff6ff;
+            color: #1d4ed8;
+        }
+        
+        .point-indicator.completed {
+            border-color: #10b981;
+            background: #f0fdf4;
+            color: #059669;
+        }
+        
+        /* Step 4: Review */
+        .review-panel {
+            padding: 20px;
+            position: relative;
+        }
+        
+        .review-map-container {
+            width: 100%;
+            height: 100%;
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+            overflow: hidden;
+        }
+        
+        #review-map {
+            width: 100%;
+            height: 100%;
+        }
+        
+        .review-controls {
+            position: absolute;
+            top: 40px;
+            right: 40px;
+            background: white;
+            padding: 24px;
+            border-radius: 12px;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+            width: 320px;
+        }
+        
+        .opacity-control {
+            margin-bottom: 24px;
+        }
+        
+        .opacity-label {
+            font-size: 14px;
+            font-weight: 500;
+            color: #1a1a1a;
+            margin-bottom: 12px;
+            display: flex;
+            justify-content: space-between;
+        }
+        
+        .opacity-value {
+            color: #6b7280;
+        }
+        
+        .opacity-slider {
+            width: 100%;
+            height: 8px;
+            border-radius: 4px;
+            background: #e5e7eb;
+            -webkit-appearance: none;
+            outline: none;
+        }
+        
+        .opacity-slider::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            width: 24px;
+            height: 24px;
+            border-radius: 50%;
+            background: #3b82f6;
+            cursor: pointer;
+            box-shadow: 0 2px 8px rgba(59, 130, 246, 0.3);
+        }
+        
+        .export-section {
+            padding-top: 24px;
+            border-top: 1px solid #e0e0e0;
+        }
+        
+        .export-title {
+            font-size: 16px;
+            font-weight: 600;
+            color: #1a1a1a;
+            margin-bottom: 16px;
+        }
+        
+        .export-buttons {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+        
+        .export-button {
+            padding: 12px 20px;
+            border: 1px solid #e0e0e0;
+            background: white;
+            border-radius: 8px;
+            font-size: 14px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+        
+        .export-button:hover {
+            background: #f3f4f6;
+            border-color: #d1d5db;
+            transform: translateX(2px);
+        }
+        
+        .export-format {
+            font-size: 12px;
+            color: #6b7280;
+        }
+        
+        /* Floating Navigation */
+        .nav-controls {
+            position: fixed;
+            bottom: 24px;
+            left: 50%;
+            transform: translateX(-50%);
+            display: flex;
+            gap: 12px;
+            z-index: 100;
+            background: white;
+            padding: 16px 24px;
+            border-radius: 12px;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+        }
+        
+        .nav-button {
+            padding: 12px 28px;
+            border: none;
+            border-radius: 8px;
+            font-size: 16px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            min-width: 120px;
+            justify-content: center;
+        }
+        
+        .nav-button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+        
+        .nav-button.secondary {
+            background: #f3f4f6;
+            color: #374151;
+        }
+        
+        .nav-button.secondary:hover:not(:disabled) {
+            background: #e5e7eb;
+        }
+        
+        .nav-button.primary {
+            background: #3b82f6;
+            color: white;
+        }
+        
+        .nav-button.primary:hover:not(:disabled) {
+            background: #2563eb;
+            transform: translateY(-1px);
+            box-shadow: 0 4px 12px rgba(59, 130, 246, 0.3);
+        }
+        
+        /* Coordinate Dialog */
+        .overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.4);
+            z-index: 999;
+            display: none;
+        }
+        
+        .coord-dialog {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: white;
+            border-radius: 12px;
+            padding: 32px;
+            box-shadow: 0 20px 50px rgba(0, 0, 0, 0.3);
+            z-index: 1000;
+            display: none;
+            min-width: 480px;
+        }
+        
+        .coord-header {
+            margin-bottom: 24px;
+        }
+        
+        .coord-title {
+            font-size: 20px;
+            font-weight: 600;
+            color: #1a1a1a;
+            margin-bottom: 8px;
+        }
+        
+        .coord-subtitle {
+            font-size: 14px;
+            color: #6b7280;
+        }
+        
+        .coord-tip {
+            background: #eff6ff;
+            border: 1px solid #bfdbfe;
+            border-radius: 8px;
+            padding: 12px 16px;
+            margin-bottom: 20px;
+            font-size: 14px;
+            color: #1d4ed8;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .coord-inputs {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 16px;
+            margin-bottom: 24px;
+        }
+        
+        .coord-input {
+            display: flex;
+            flex-direction: column;
+        }
+        
+        .coord-input label {
+            font-size: 14px;
+            font-weight: 500;
+            color: #374151;
+            margin-bottom: 6px;
+        }
+        
+        .coord-input input {
+            padding: 10px 14px;
+            border: 1px solid #d1d5db;
+            border-radius: 6px;
+            font-size: 16px;
+            transition: all 0.2s;
+        }
+        
+        .coord-input input:focus {
+            outline: none;
+            border-color: #3b82f6;
+            box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+        }
+        
+        .coord-buttons {
+            display: flex;
+            gap: 12px;
+            justify-content: flex-end;
+        }
+        
+        /* Preview Modal */
+        .preview-modal {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 20px 50px rgba(0, 0, 0, 0.3);
+            z-index: 1000;
+            display: none;
+            max-width: 80%;
+            max-height: 80%;
+            overflow: hidden;
+        }
+        
+        .preview-header {
+            padding: 20px 24px;
+            border-bottom: 1px solid #e0e0e0;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        .preview-title {
+            font-size: 20px;
+            font-weight: 600;
+            color: #1a1a1a;
+        }
+        
+        .preview-close {
+            width: 36px;
+            height: 36px;
+            border: none;
+            background: #f3f4f6;
+            border-radius: 6px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 20px;
+            color: #6b7280;
+            transition: all 0.2s;
+        }
+        
+        .preview-close:hover {
+            background: #e5e7eb;
+        }
+        
+        .preview-body {
+            padding: 24px;
+            max-height: 60vh;
+            overflow: auto;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        
+        .preview-canvas {
+            max-width: 100%;
+            max-height: 100%;
+            display: block;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+        }
+        
+        .preview-footer {
+            padding: 20px 24px;
+            border-top: 1px solid #e0e0e0;
+            display: flex;
+            justify-content: flex-end;
+            gap: 12px;
+        }
+        
+        /* Instructions */
+        .instructions {
+            position: absolute;
+            top: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: #eff6ff;
+            border: 1px solid #bfdbfe;
+            border-radius: 8px;
+            padding: 12px 20px;
+            font-size: 14px;
+            color: #1d4ed8;
+            z-index: 10;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+        }
+        
+        /* Loading */
+        .loading-spinner {
+            width: 48px;
+            height: 48px;
+            border: 4px solid #f3f4f6;
+            border-top-color: #3b82f6;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin: 0 auto;
+        }
+        
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body>
+    <!-- Progress Bar -->
+    <div class="progress-bar">
+        <div class="progress-steps">
+            <div class="progress-step active" data-step="1">
+                <div class="progress-indicator">
+                    <span>1</span>
+                </div>
+                <span class="progress-label">Upload PDF</span>
+            </div>
+            
+            <div class="progress-step" data-step="2">
+                <div class="progress-indicator">
+                    <span>2</span>
+                </div>
+                <span class="progress-label">Remove Background</span>
+            </div>
+            
+            <div class="progress-step" data-step="3">
+                <div class="progress-indicator">
+                    <span>3</span>
+                </div>
+                <span class="progress-label">Set Reference Points</span>
+            </div>
+            
+            <div class="progress-step" data-step="4">
+                <div class="progress-indicator">
+                    <span>4</span>
+                </div>
+                <span class="progress-label">Review & Export</span>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Main Container -->
+    <div class="main-container">
+        <!-- Step 1: Upload -->
+        <div class="step-panel upload-panel active" data-step="1">
+            <div class="upload-container">
+                <div class="upload-area" onclick="document.getElementById('pdfInput').click()">
+                    <div class="upload-icon">📄</div>
+                    <h2 class="upload-title">Upload Your PDF Plan</h2>
+                    <p class="upload-subtitle">Click to browse or drag and drop</p>
+                    <p class="upload-formats">Supports PDF files up to 50MB</p>
+                    <input type="file" id="pdfInput" class="file-input" accept=".pdf">
+                </div>
+            </div>
+        </div>
+        
+        <!-- Step 2: Background Removal -->
+        <div class="step-panel removal-panel" data-step="2">
+            <div class="pdf-preview-panel">
+                <div class="zoom-controls">
+                    <button class="zoom-button" onclick="zoomIn()">+</button>
+                    <button class="zoom-button" onclick="zoomOut()">−</button>
+                    <button class="zoom-button" onclick="resetZoom()">⟲</button>
+                </div>
+                <div class="pdf-viewer">
+                    <div class="pdf-container">
+                        <img class="pdf-image" style="display: none;">
+                    </div>
+                </div>
+            </div>
+            
+            <div class="removal-tools">
+                <h3 style="font-size: 18px; font-weight: 600; margin: 0;">Selection Mode</h3>
+                
+                <div class="mode-selector">
+                    <button class="mode-button active" data-mode="remove">Remove Areas</button>
+                    <button class="mode-button" data-mode="keep">Keep Areas</button>
+                </div>
+                
+                <div class="instructions" style="position: relative; top: auto; left: auto; transform: none;">
+                    <p style="margin: 0;">Click and drag to select areas</p>
+                </div>
+                
+                <div class="selection-info">
+                    <div class="selection-count">0</div>
+                    <div class="selection-label">areas selected</div>
+                </div>
+                
+                <div class="tool-buttons">
+                    <button class="tool-button preview" onclick="showPreview()">
+                        Preview Result
+                    </button>
+                    <button class="tool-button clear" onclick="clearSelections()">
+                        Clear All Selections
+                    </button>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Step 3: Reference Points -->
+        <div class="step-panel reference-panel" data-step="3">
+            <div class="reference-split">
+                <div class="reference-pane">
+                    <div class="reference-header">
+                        <span>PDF Plan</span>
+                        <span id="pdf-point-status" style="font-size: 14px; color: #6b7280;">Click to set point 1</span>
+                    </div>
+                    <div class="reference-content">
+                        <div class="pdf-viewer" style="height: 100%; padding: 0;">
+                            <div class="pdf-container">
+                                <img class="pdf-image" style="display: none;">
+                                <div class="crosshair"></div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="point-status">
+                        <div class="point-indicator" data-point="1">Point 1</div>
+                        <div class="point-indicator" data-point="2">Point 2</div>
+                    </div>
+                </div>
+                
+                <div class="reference-pane">
+                    <div class="reference-header">
+                        <span>Map View</span>
+                        <span id="map-point-status" style="font-size: 14px; color: #6b7280;">Set coordinates</span>
+                    </div>
+                    <div class="reference-content">
+                        <div id="map"></div>
+                    </div>
+                    <div class="point-status">
+                        <div class="point-indicator" data-point="1">Point 1</div>
+                        <div class="point-indicator" data-point="2">Point 2</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Step 4: Review -->
+        <div class="step-panel review-panel" data-step="4">
+            <div class="review-map-container">
+                <div id="review-map"></div>
+            </div>
+            
+            <div class="review-controls">
+                <h3 style="font-size: 18px; font-weight: 600; margin: 0 0 20px 0;">Map Controls</h3>
+                
+                <div class="opacity-control">
+                    <div class="opacity-label">
+                        Plan Opacity
+                        <span class="opacity-value">70%</span>
+                    </div>
+                    <input type="range" class="opacity-slider" min="0" max="100" value="70">
+                </div>
+                
+                <div class="export-section">
+                    <h4 class="export-title">Export Options</h4>
+                    <div class="export-buttons">
+                        <button class="export-button" onclick="exportGeoTIFF()">
+                            <span>GeoTIFF</span>
+                            <span class="export-format">.tif</span>
+                        </button>
+                        <button class="export-button" onclick="exportKML()">
+                            <span>Google Earth</span>
+                            <span class="export-format">.kml</span>
+                        </button>
+                        <button class="export-button" onclick="exportWorldFile()">
+                            <span>World File</span>
+                            <span class="export-format">.pgw</span>
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Floating Navigation -->
+    <div class="nav-controls">
+        <button class="nav-button secondary" onclick="previousStep()" style="display: none;">
+            <span>←</span>
+            Back
+        </button>
+        <button class="nav-button primary" onclick="nextStep()" disabled>
+            Continue
+            <span>→</span>
+        </button>
+    </div>
+    
+    <!-- Coordinate Dialog -->
+    <div class="overlay"></div>
+    <div class="coord-dialog">
+        <div class="coord-header">
+            <h3 class="coord-title">Set Reference Point <span class="point-number">1</span></h3>
+            <p class="coord-subtitle">Enter coordinates or click on the map</p>
+        </div>
+        
+        <div class="coord-tip">
+            <span>💡</span>
+            Click on the map to automatically fill coordinates
+        </div>
+        
+        <div class="coord-inputs">
+            <div class="coord-input">
+                <label>Longitude / X</label>
+                <input type="text" class="coord-x" placeholder="e.g., 14.2229">
+            </div>
+            <div class="coord-input">
+                <label>Latitude / Y</label>
+                <input type="text" class="coord-y" placeholder="e.g., 46.6263">
+            </div>
+        </div>
+        
+        <div class="coord-buttons">
+            <button class="nav-button secondary" onclick="cancelCoordinate()">Cancel</button>
+            <button class="nav-button primary" onclick="confirmCoordinate()">Confirm</button>
+        </div>
+    </div>
+    
+    <!-- Preview Modal -->
+    <div class="preview-modal">
+        <div class="preview-header">
+            <h3 class="preview-title">Preview</h3>
+            <button class="preview-close" onclick="closePreview()">×</button>
+        </div>
+        <div class="preview-body">
+            <canvas class="preview-canvas"></canvas>
+        </div>
+        <div class="preview-footer">
+            <button class="nav-button secondary" onclick="closePreview()">Cancel</button>
+            <button class="nav-button primary" onclick="applyChanges()">Apply Changes</button>
+        </div>
+    </div>
+    
+    <script>
+        // Initialize PDF.js
+        pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+        
+        // Global state
+        let currentStep = 1;
+        let pdfData = {
+            originalUrl: null,
+            processedUrl: null,
+            width: 0,
+            height: 0,
+            zoom: 1
+        };
+        let selectionState = {
+            mode: 'remove',
+            selections: [],
+            isSelecting: false,
+            canvas: null,
+            ctx: null,
+            startX: 0,
+            startY: 0
+        };
+        let referencePoints = [];
+        let currentPoint = 0;
+        let map = null;
+        let reviewMap = null;
+        
+        // Initialize
+        document.addEventListener('DOMContentLoaded', () => {
+            setupEventListeners();
+            initializeMaps();
+        });
+        
+        // Setup event listeners
+        function setupEventListeners() {
+            // File upload
+            const uploadArea = document.querySelector('.upload-area');
+            const fileInput = document.getElementById('pdfInput');
+            
+            uploadArea.addEventListener('dragover', (e) => {
+                e.preventDefault();
+                uploadArea.classList.add('dragover');
+            });
+            
+            uploadArea.addEventListener('dragleave', () => {
+                uploadArea.classList.remove('dragover');
+            });
+            
+            uploadArea.addEventListener('drop', (e) => {
+                e.preventDefault();
+                uploadArea.classList.remove('dragover');
+                handleFileUpload(e.dataTransfer.files[0]);
+            });
+            
+            fileInput.addEventListener('change', (e) => {
+                handleFileUpload(e.target.files[0]);
+            });
+            
+            // Mode buttons
+            document.querySelectorAll('.mode-button').forEach(btn => {
+                btn.addEventListener('click', (e) => {
+                    document.querySelectorAll('.mode-button').forEach(b => b.classList.remove('active'));
+                    e.target.classList.add('active');
+                    selectionState.mode = e.target.dataset.mode;
+                });
+            });
+            
+            // Opacity slider
+            document.querySelector('.opacity-slider').addEventListener('input', (e) => {
+                const value = e.target.value;
+                document.querySelector('.opacity-value').textContent = value + '%';
+                updateOverlayOpacity(value);
+            });
+        }
+        
+        // Navigation
+        function nextStep() {
+            if (currentStep < 4) {
+                // Validate current step
+                if (currentStep === 2) {
+                    applyBackgroundRemoval();
+                }
+                
+                // Update progress
+                document.querySelector(`.progress-step[data-step="${currentStep}"]`).classList.add('completed');
+                currentStep++;
+                document.querySelector(`.progress-step[data-step="${currentStep}"]`).classList.add('active');
+                
+                // Switch panels
+                document.querySelectorAll('.step-panel').forEach(panel => {
+                    panel.classList.remove('active');
+                });
+                document.querySelector(`.step-panel[data-step="${currentStep}"]`).classList.add('active');
+                
+                // Update navigation
+                updateNavigation();
+                
+                // Initialize step
+                initializeStep(currentStep);
+            } else if (currentStep === 4) {
+                completeProcess();
+            }
+        }
+        
+        function previousStep() {
+            if (currentStep > 1) {
+                // Update progress
+                document.querySelector(`.progress-step[data-step="${currentStep}"]`).classList.remove('active');
+                currentStep--;
+                document.querySelector(`.progress-step[data-step="${currentStep}"]`).classList.remove('completed');
+                
+                // Switch panels
+                document.querySelectorAll('.step-panel').forEach(panel => {
+                    panel.classList.remove('active');
+                });
+                document.querySelector(`.step-panel[data-step="${currentStep}"]`).classList.add('active');
+                
+                // Update navigation
+                updateNavigation();
+            }
+        }
+        
+        function updateNavigation() {
+            const backBtn = document.querySelector('.nav-button.secondary');
+            const nextBtn = document.querySelector('.nav-button.primary');
+            
+            // Show/hide back button
+            backBtn.style.display = currentStep > 1 ? 'flex' : 'none';
+            
+            // Update next button
+            if (currentStep === 4) {
+                nextBtn.innerHTML = 'Complete <span>✓</span>';
+            } else {
+                nextBtn.innerHTML = 'Continue <span>→</span>';
+            }
+            
+            // Enable/disable based on step completion
+            if (currentStep === 1) {
+                nextBtn.disabled = !pdfData.originalUrl;
+            } else if (currentStep === 3) {
+                nextBtn.disabled = referencePoints.length < 2;
+            } else {
+                nextBtn.disabled = false;
+            }
+        }
+        
+        // Initialize step
+        function initializeStep(step) {
+            switch(step) {
+                case 2:
+                    initializeBackgroundRemoval();
+                    break;
+                case 3:
+                    initializeReferencePoints();
+                    break;
+                case 4:
+                    initializeReview();
+                    break;
+            }
+        }
+        
+        // Handle file upload
+        async function handleFileUpload(file) {
+            if (!file || file.type !== 'application/pdf') {
+                alert('Please upload a PDF file');
+                return;
+            }
+            
+            try {
+                // Show loading
+                const uploadArea = document.querySelector('.upload-area');
+                uploadArea.innerHTML = '<div class="loading-spinner"></div><p>Processing PDF...</p>';
+                
+                // Convert PDF to image
+                const arrayBuffer = await file.arrayBuffer();
+                const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+                const page = await pdf.getPage(1);
+                
+                const scale = 2;
+                const viewport = page.getViewport({ scale });
+                
+                const canvas = document.createElement('canvas');
+                const context = canvas.getContext('2d');
+                canvas.width = viewport.width;
+                canvas.height = viewport.height;
+                
+                await page.render({
+                    canvasContext: context,
+                    viewport: viewport
+                }).promise;
+                
+                // Store PDF data
+                pdfData.originalUrl = canvas.toDataURL('image/png');
+                pdfData.processedUrl = pdfData.originalUrl;
+                pdfData.width = canvas.width;
+                pdfData.height = canvas.height;
+                
+                // Update UI
+                uploadArea.innerHTML = `
+                    <div class="upload-icon" style="background: #f0fdf4;">✓</div>
+                    <h2 class="upload-title">PDF Uploaded Successfully</h2>
+                    <p class="upload-subtitle">${file.name}</p>
+                `;
+                
+                // Enable next button
+                updateNavigation();
+                
+            } catch (error) {
+                console.error('Error processing PDF:', error);
+                alert('Error processing PDF. Please try another file.');
+            }
+        }
+        
+        // Initialize background removal
+        function initializeBackgroundRemoval() {
+            const pdfImage = document.querySelector('.removal-panel .pdf-image');
+            pdfImage.src = pdfData.processedUrl;
+            pdfImage.style.display = 'block';
+            
+            // Create selection canvas after image loads
+            pdfImage.onload = () => {
+                createSelectionCanvas();
+            };
+        }
+        
+        // Create selection canvas
+        function createSelectionCanvas() {
+            const pdfContainer = document.querySelector('.removal-panel .pdf-container');
+            const pdfImage = document.querySelector('.removal-panel .pdf-image');
+            
+            // Remove existing canvas
+            if (selectionState.canvas) {
+                selectionState.canvas.remove();
+            }
+            
+            // Create new canvas
+            const canvas = document.createElement('canvas');
+            canvas.className = 'selection-canvas';
+            canvas.width = pdfImage.naturalWidth;
+            canvas.height = pdfImage.naturalHeight;
+            canvas.style.width = pdfImage.width + 'px';
+            canvas.style.height = pdfImage.height + 'px';
+            
+            pdfContainer.appendChild(canvas);
+            
+            selectionState.canvas = canvas;
+            selectionState.ctx = canvas.getContext('2d');
+            
+            // Add event listeners
+            canvas.addEventListener('mousedown', startSelection);
+            canvas.addEventListener('mousemove', updateSelection);
+            canvas.addEventListener('mouseup', endSelection);
+            
+            // Redraw existing selections
+            drawSelections();
+        }
+        
+        // Selection handlers
+        function startSelection(e) {
+            const rect = e.target.getBoundingClientRect();
+            const scaleX = e.target.width / rect.width;
+            const scaleY = e.target.height / rect.height;
+            
+            selectionState.isSelecting = true;
+            selectionState.startX = (e.clientX - rect.left) * scaleX;
+            selectionState.startY = (e.clientY - rect.top) * scaleY;
+        }
+        
+        function updateSelection(e) {
+            if (!selectionState.isSelecting) return;
+            
+            const rect = e.target.getBoundingClientRect();
+            const scaleX = e.target.width / rect.width;
+            const scaleY = e.target.height / rect.height;
+            
+            const currentX = (e.clientX - rect.left) * scaleX;
+            const currentY = (e.clientY - rect.top) * scaleY;
+            
+            // Clear and redraw
+            drawSelections();
+            
+            // Draw current selection
+            const ctx = selectionState.ctx;
+            ctx.fillStyle = 'rgba(59, 130, 246, 0.2)';
+            ctx.strokeStyle = '#3b82f6';
+            ctx.lineWidth = 2;
+            ctx.setLineDash([5, 5]);
+            
+            const x = Math.min(selectionState.startX, currentX);
+            const y = Math.min(selectionState.startY, currentY);
+            const width = Math.abs(currentX - selectionState.startX);
+            const height = Math.abs(currentY - selectionState.startY);
+            
+            ctx.fillRect(x, y, width, height);
+            ctx.strokeRect(x, y, width, height);
+            ctx.setLineDash([]);
+        }
+        
+        function endSelection(e) {
+            if (!selectionState.isSelecting) return;
+            
+            selectionState.isSelecting = false;
+            
+            const rect = e.target.getBoundingClientRect();
+            const scaleX = e.target.width / rect.width;
+            const scaleY = e.target.height / rect.height;
+            
+            const endX = (e.clientX - rect.left) * scaleX;
+            const endY = (e.clientY - rect.top) * scaleY;
+            
+            const width = Math.abs(endX - selectionState.startX);
+            const height = Math.abs(endY - selectionState.startY);
+            
+            if (width > 5 && height > 5) {
+                selectionState.selections.push({
+                    x: Math.min(selectionState.startX, endX),
+                    y: Math.min(selectionState.startY, endY),
+                    width: width,
+                    height: height
+                });
+                
+                updateSelectionCount();
+            }
+            
+            drawSelections();
+        }
+        
+        function drawSelections() {
+            const ctx = selectionState.ctx;
+            ctx.clearRect(0, 0, selectionState.canvas.width, selectionState.canvas.height);
+            
+            selectionState.selections.forEach(sel => {
+                if (selectionState.mode === 'remove') {
+                    ctx.fillStyle = 'rgba(239, 68, 68, 0.3)';
+                    ctx.strokeStyle = '#ef4444';
+                } else {
+                    ctx.fillStyle = 'rgba(16, 185, 129, 0.3)';
+                    ctx.strokeStyle = '#10b981';
+                }
+                
+                ctx.lineWidth = 2;
+                ctx.fillRect(sel.x, sel.y, sel.width, sel.height);
+                ctx.strokeRect(sel.x, sel.y, sel.width, sel.height);
+            });
+        }
+        
+        function updateSelectionCount() {
+            document.querySelector('.selection-count').textContent = selectionState.selections.length;
+        }
+        
+        function clearSelections() {
+            selectionState.selections = [];
+            drawSelections();
+            updateSelectionCount();
+        }
+        
+        function showPreview() {
+            if (selectionState.selections.length === 0) {
+                alert('Please make at least one selection');
+                return;
+            }
+            
+            // Create preview
+            const canvas = document.createElement('canvas');
+            const ctx = canvas.getContext('2d');
+            const img = new Image();
+            
+            img.onload = () => {
+                canvas.width = img.width;
+                canvas.height = img.height;
+                
+                if (selectionState.mode === 'keep') {
+                    ctx.clearRect(0, 0, canvas.width, canvas.height);
+                    selectionState.selections.forEach(sel => {
+                        ctx.drawImage(img, sel.x, sel.y, sel.width, sel.height, sel.x, sel.y, sel.width, sel.height);
+                    });
+                } else {
+                    ctx.drawImage(img, 0, 0);
+                    ctx.save();
+                    ctx.globalCompositeOperation = 'destination-out';
+                    selectionState.selections.forEach(sel => {
+                        ctx.fillRect(sel.x, sel.y, sel.width, sel.height);
+                    });
+                    ctx.restore();
+                }
+                
+                // Show preview
+                const previewCanvas = document.querySelector('.preview-canvas');
+                const previewCtx = previewCanvas.getContext('2d');
+                
+                const maxWidth = window.innerWidth * 0.7;
+                const maxHeight = window.innerHeight * 0.7;
+                const scale = Math.min(maxWidth / canvas.width, maxHeight / canvas.height, 1);
+                
+                previewCanvas.width = canvas.width * scale;
+                previewCanvas.height = canvas.height * scale;
+                
+                previewCtx.drawImage(canvas, 0, 0, previewCanvas.width, previewCanvas.height);
+                
+                document.querySelector('.overlay').style.display = 'block';
+                document.querySelector('.preview-modal').style.display = 'block';
+            };
+            
+            img.src = pdfData.originalUrl;
+        }
+        
+        function closePreview() {
+            document.querySelector('.overlay').style.display = 'none';
+            document.querySelector('.preview-modal').style.display = 'none';
+        }
+        
+        function applyChanges() {
+            applyBackgroundRemoval();
+            closePreview();
+        }
+        
+        function applyBackgroundRemoval() {
+            if (selectionState.selections.length === 0) {
+                return;
+            }
+            
+            const canvas = document.createElement('canvas');
+            const ctx = canvas.getContext('2d');
+            const img = new Image();
+            
+            img.onload = () => {
+                canvas.width = img.width;
+                canvas.height = img.height;
+                
+                if (selectionState.mode === 'keep') {
+                    ctx.clearRect(0, 0, canvas.width, canvas.height);
+                    selectionState.selections.forEach(sel => {
+                        ctx.drawImage(img, sel.x, sel.y, sel.width, sel.height, sel.x, sel.y, sel.width, sel.height);
+                    });
+                } else {
+                    ctx.drawImage(img, 0, 0);
+                    ctx.save();
+                    ctx.globalCompositeOperation = 'destination-out';
+                    selectionState.selections.forEach(sel => {
+                        ctx.fillRect(sel.x, sel.y, sel.width, sel.height);
+                    });
+                    ctx.restore();
+                }
+                
+                pdfData.processedUrl = canvas.toDataURL('image/png');
+            };
+            
+            img.src = pdfData.originalUrl;
+        }
+        
+        // Zoom functions
+        function zoomIn() {
+            pdfData.zoom = Math.min(pdfData.zoom * 1.2, 3);
+            updateZoom();
+        }
+        
+        function zoomOut() {
+            pdfData.zoom = Math.max(pdfData.zoom / 1.2, 0.5);
+            updateZoom();
+        }
+        
+        function resetZoom() {
+            pdfData.zoom = 1;
+            updateZoom();
+        }
+        
+        function updateZoom() {
+            const pdfImage = document.querySelector('.removal-panel .pdf-image');
+            pdfImage.style.transform = `scale(${pdfData.zoom})`;
+        }
+        
+        // Initialize maps
+        function initializeMaps() {
+            // Reference map
+            setTimeout(() => {
+                const mapContainer = document.getElementById('map');
+                if (mapContainer && !map) {
+                    map = new maplibregl.Map({
+                        container: mapContainer,
+                        style: 'https://gis.ktn.gv.at/osgdi/styles/basemap_ktn_vektor.json',
+                        center: [14.222929599999969, 46.62632869999987],
+                        zoom: 13
+                    });
+                    
+                    map.addControl(new maplibregl.NavigationControl());
+                }
+            }, 100);
+        }
+        
+        // Initialize reference points
+        function initializeReferencePoints() {
+            const pdfImage = document.querySelector('.reference-panel .pdf-image');
+            pdfImage.src = pdfData.processedUrl;
+            pdfImage.style.display = 'block';
+            
+            // Reset state
+            referencePoints = [];
+            currentPoint = 0;
+            
+            // Clear any existing points
+            document.querySelectorAll('.reference-point').forEach(p => p.remove());
+            
+            // Update UI
+            updatePointIndicators();
+            
+            // Setup click handler
+            const pdfContainer = document.querySelector('.reference-panel .pdf-container');
+            const crosshair = document.querySelector('.reference-panel .crosshair');
+            
+            pdfContainer.addEventListener('mousemove', (e) => {
+                if (currentPoint < 2) {
+                    crosshair.style.display = 'block';
+                    const rect = pdfContainer.getBoundingClientRect();
+                    crosshair.style.left = (e.clientX - rect.left) + 'px';
+                    crosshair.style.top = (e.clientY - rect.top) + 'px';
+                }
+            });
+            
+            pdfContainer.addEventListener('mouseleave', () => {
+                crosshair.style.display = 'none';
+            });
+            
+            pdfContainer.addEventListener('click', handlePdfClick);
+        }
+        
+        function handlePdfClick(e) {
+            if (currentPoint >= 2) return;
+            
+            const pdfContainer = e.currentTarget;
+            const pdfImage = pdfContainer.querySelector('.pdf-image');
+            const rect = pdfImage.getBoundingClientRect();
+            const containerRect = pdfContainer.getBoundingClientRect();
+            
+            // Calculate normalized coordinates
+            const x = (e.clientX - rect.left) / rect.width;
+            const y = (e.clientY - rect.top) / rect.height;
+            
+            // Add visual marker
+            const marker = document.createElement('div');
+            marker.className = 'reference-point';
+            marker.style.left = (e.clientX - containerRect.left) + 'px';
+            marker.style.top = (e.clientY - containerRect.top) + 'px';
+            
+            const label = document.createElement('div');
+            label.className = 'reference-label';
+            label.textContent = `Point ${currentPoint + 1}`;
+            marker.appendChild(label);
+            
+            pdfContainer.appendChild(marker);
+            
+            // Show coordinate dialog
+            showCoordinateDialog(x, y);
+        }
+        
+        function showCoordinateDialog(x, y) {
+            window.currentPdfPoint = { x, y };
+            
+            document.querySelector('.overlay').style.display = 'block';
+            document.querySelector('.coord-dialog').style.display = 'block';
+            document.querySelector('.point-number').textContent = currentPoint + 1;
+            
+            // Clear inputs
+            document.querySelector('.coord-x').value = '';
+            document.querySelector('.coord-y').value = '';
+            
+            // Enable map clicking
+            map.getCanvas().style.cursor = 'crosshair';
+            map.once('click', (e) => {
+                const coords = e.lngLat;
+                document.querySelector('.coord-x').value = coords.lng.toFixed(6);
+                document.querySelector('.coord-y').value = coords.lat.toFixed(6);
+                map.getCanvas().style.cursor = '';
+            });
+        }
+        
+        function cancelCoordinate() {
+            document.querySelector('.overlay').style.display = 'none';
+            document.querySelector('.coord-dialog').style.display = 'none';
+            map.getCanvas().style.cursor = '';
+            
+            // Remove the last marker
+            const markers = document.querySelectorAll('.reference-point');
+            if (markers.length > currentPoint) {
+                markers[markers.length - 1].remove();
+            }
+        }
+        
+        function confirmCoordinate() {
+            const x = parseFloat(document.querySelector('.coord-x').value);
+            const y = parseFloat(document.querySelector('.coord-y').value);
+            
+            if (isNaN(x) || isNaN(y)) {
+                alert('Please enter valid coordinates');
+                return;
+            }
+            
+            referencePoints.push({
+                pdf: window.currentPdfPoint,
+                world: { x, y }
+            });
+            
+            currentPoint++;
+            updatePointIndicators();
+            
+            document.querySelector('.overlay').style.display = 'none';
+            document.querySelector('.coord-dialog').style.display = 'none';
+            
+            if (currentPoint >= 2) {
+                updateNavigation();
+                document.querySelector('.crosshair').style.display = 'none';
+            }
+        }
+        
+        function updatePointIndicators() {
+            document.querySelectorAll('.point-indicator').forEach((indicator, index) => {
+                indicator.classList.remove('active', 'completed');
+                if (index < currentPoint) {
+                    indicator.classList.add('completed');
+                } else if (index === currentPoint) {
+                    indicator.classList.add('active');
+                }
+            });
+            
+            // Update status text
+            if (currentPoint < 2) {
+                document.getElementById('pdf-point-status').textContent = `Click to set point ${currentPoint + 1}`;
+            } else {
+                document.getElementById('pdf-point-status').textContent = 'All points set';
+            }
+        }
+        
+        // Initialize review
+        function initializeReview() {
+            if (!reviewMap) {
+                const reviewMapContainer = document.getElementById('review-map');
+                reviewMap = new maplibregl.Map({
+                    container: reviewMapContainer,
+                    style: 'https://gis.ktn.gv.at/osgdi/styles/basemap_ktn_vektor.json',
+                    center: [14.222929599999969, 46.62632869999987],
+                    zoom: 13
+                });
+                
+                reviewMap.addControl(new maplibregl.NavigationControl());
+                
+                reviewMap.on('load', () => {
+                    addGeoreferencedOverlay();
+                });
+            } else {
+                addGeoreferencedOverlay();
+            }
+        }
+        
+        function addGeoreferencedOverlay() {
+            // Calculate transformation based on reference points
+            // This is a simplified version - implement full transformation logic as needed
+            console.log('Adding overlay with reference points:', referencePoints);
+            
+            // For now, just fit bounds to reference points
+            if (referencePoints.length === 2) {
+                const bounds = [
+                    [Math.min(referencePoints[0].world.x, referencePoints[1].world.x),
+                     Math.min(referencePoints[0].world.y, referencePoints[1].world.y)],
+                    [Math.max(referencePoints[0].world.x, referencePoints[1].world.x),
+                     Math.max(referencePoints[0].world.y, referencePoints[1].world.y)]
+                ];
+                
+                reviewMap.fitBounds(bounds, { padding: 50 });
+            }
+        }
+        
+        function updateOverlayOpacity(value) {
+            if (reviewMap && reviewMap.getLayer('pdf-overlay')) {
+                reviewMap.setPaintProperty('pdf-overlay', 'raster-opacity', parseFloat(value) / 100);
+            }
+        }
+        
+        // Export functions
+        function exportGeoTIFF() {
+            alert('Exporting as GeoTIFF...');
+        }
+        
+        function exportKML() {
+            alert('Exporting as KML...');
+        }
+        
+        function exportWorldFile() {
+            alert('Exporting World File...');
+        }
+        
+        function completeProcess() {
+            alert('Georeferencing complete! Your files have been saved.');
+        }
+    </script>
+</body>
+</html>
